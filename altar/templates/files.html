@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cathedral - File Management</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .input-field { @apply w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-gray-100 focus:border-purple-500 focus:outline-none; }
+        .btn { @apply px-4 py-2 rounded font-medium transition-colors cursor-pointer; }
+        .btn-primary { @apply bg-purple-600 hover:bg-purple-700 text-white; }
+        .btn-secondary { @apply bg-gray-600 hover:bg-gray-700 text-white; }
+        .btn-danger { @apply bg-red-600 hover:bg-red-700 text-white; }
+        .btn-sm { @apply px-2 py-1 text-sm; }
+        .card { @apply bg-gray-800 rounded-lg p-6 border border-gray-700; }
+        .folder-card { @apply bg-gray-800 rounded-lg p-4 border border-gray-700 hover:border-gray-600 transition-colors; }
+        .perm-readonly { @apply text-blue-400; }
+        .perm-readwrite { @apply text-green-400; }
+        .perm-noaccess { @apply text-red-400; }
+        .file-row { @apply flex items-center justify-between py-2 px-3 hover:bg-gray-700/50 rounded cursor-pointer; }
+        .file-icon { @apply w-5 h-5 text-gray-400 mr-3; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-6xl">
+        <!-- Header -->
+        <div class="flex justify-between items-center mb-8">
+            <div>
+                <h1 class="text-3xl font-bold text-purple-400">File Management</h1>
+                <p class="text-gray-400 mt-1">Manage folder access and browse files</p>
+            </div>
+            <div class="flex gap-3">
+                <button onclick="showAddFolderModal()" class="btn btn-primary">
+                    + Add Folder
+                </button>
+                <a href="/" class="btn btn-secondary">Back to Chat</a>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-12 gap-6">
+            <!-- Left: Folders List -->
+            <div class="col-span-4">
+                <div class="card">
+                    <h2 class="text-lg font-semibold text-purple-400 mb-4">Configured Folders</h2>
+                    <div id="folders-list" class="space-y-3">
+                        <!-- Populated by JS -->
+                    </div>
+                    <div id="no-folders" class="hidden text-gray-500 text-center py-8">
+                        <p>No folders configured</p>
+                        <p class="text-sm mt-2">Click "Add Folder" to get started</p>
+                    </div>
+                </div>
+
+                <!-- Backup Stats -->
+                <div class="card mt-4">
+                    <h2 class="text-lg font-semibold text-purple-400 mb-4">Backups</h2>
+                    <div id="backup-stats" class="text-sm text-gray-400">
+                        <!-- Populated by JS -->
+                    </div>
+                    <button onclick="showBackupsModal()" class="btn btn-secondary btn-sm mt-3 w-full">
+                        View Backups
+                    </button>
+                </div>
+            </div>
+
+            <!-- Right: File Browser -->
+            <div class="col-span-8">
+                <div class="card">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-lg font-semibold text-purple-400">
+                            <span id="browser-title">File Browser</span>
+                        </h2>
+                        <div class="flex gap-2">
+                            <button onclick="navigateUp()" id="nav-up-btn" class="btn btn-secondary btn-sm hidden">
+                                &#8593; Up
+                            </button>
+                            <button onclick="refreshFiles()" class="btn btn-secondary btn-sm">
+                                &#8635; Refresh
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Breadcrumb -->
+                    <div id="breadcrumb" class="text-sm text-gray-400 mb-4 hidden">
+                        <!-- Populated by JS -->
+                    </div>
+
+                    <!-- File List -->
+                    <div id="file-list" class="space-y-1 max-h-96 overflow-y-auto">
+                        <div class="text-gray-500 text-center py-8">
+                            Select a folder to browse files
+                        </div>
+                    </div>
+                </div>
+
+                <!-- File Content Viewer -->
+                <div id="file-viewer" class="card mt-4 hidden">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-lg font-semibold text-purple-400">
+                            <span id="viewer-filename">File Content</span>
+                        </h2>
+                        <button onclick="closeViewer()" class="btn btn-secondary btn-sm">Close</button>
+                    </div>
+                    <pre id="file-content" class="bg-gray-900 p-4 rounded text-sm overflow-x-auto max-h-96 overflow-y-auto text-gray-300"></pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast -->
+        <div id="toast" class="fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg hidden transition-all transform translate-y-2 opacity-0">
+            <span id="toast-message"></span>
+        </div>
+    </div>
+
+    <!-- Add Folder Modal -->
+    <div id="add-folder-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 hidden">
+        <div class="bg-gray-900 rounded-xl p-6 w-full max-w-md border border-gray-700">
+            <h2 class="text-xl font-semibold text-purple-400 mb-4">Add Folder</h2>
+            <form onsubmit="addFolder(event)" class="space-y-4">
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Folder ID</label>
+                    <input type="text" id="folder-id" required pattern="[a-z0-9_]+" class="input-field" placeholder="my_projects">
+                    <p class="text-xs text-gray-500 mt-1">Lowercase letters, numbers, underscores</p>
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Path</label>
+                    <input type="text" id="folder-path" required class="input-field" placeholder="C:\Users\...">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Display Name</label>
+                    <input type="text" id="folder-name" required class="input-field" placeholder="My Projects">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Permission</label>
+                    <select id="folder-permission" class="input-field">
+                        <option value="read_only">Read Only</option>
+                        <option value="read_write">Read & Write</option>
+                        <option value="no_access">No Access</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Backup Policy</label>
+                    <select id="folder-backup" class="input-field">
+                        <option value="on_modify">On Modify</option>
+                        <option value="on_delete">On Delete</option>
+                        <option value="always">Always</option>
+                        <option value="never">Never</option>
+                    </select>
+                </div>
+                <div class="flex gap-3 pt-2">
+                    <button type="button" onclick="hideAddFolderModal()" class="btn btn-secondary flex-1">Cancel</button>
+                    <button type="submit" class="btn btn-primary flex-1">Add Folder</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Folder Modal -->
+    <div id="edit-folder-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 hidden">
+        <div class="bg-gray-900 rounded-xl p-6 w-full max-w-md border border-gray-700">
+            <h2 class="text-xl font-semibold text-purple-400 mb-4">Edit Folder</h2>
+            <form onsubmit="updateFolder(event)" class="space-y-4">
+                <input type="hidden" id="edit-folder-id">
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Display Name</label>
+                    <input type="text" id="edit-folder-name" required class="input-field">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Permission</label>
+                    <select id="edit-folder-permission" class="input-field">
+                        <option value="read_only">Read Only</option>
+                        <option value="read_write">Read & Write</option>
+                        <option value="no_access">No Access</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Backup Policy</label>
+                    <select id="edit-folder-backup" class="input-field">
+                        <option value="on_modify">On Modify</option>
+                        <option value="on_delete">On Delete</option>
+                        <option value="always">Always</option>
+                        <option value="never">Never</option>
+                    </select>
+                </div>
+                <div class="flex gap-3 pt-2">
+                    <button type="button" onclick="hideEditFolderModal()" class="btn btn-secondary flex-1">Cancel</button>
+                    <button type="button" onclick="deleteFolder()" class="btn btn-danger flex-1">Delete</button>
+                    <button type="submit" class="btn btn-primary flex-1">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Backups Modal -->
+    <div id="backups-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 hidden">
+        <div class="bg-gray-900 rounded-xl p-6 w-full max-w-2xl border border-gray-700 max-h-[80vh] overflow-hidden flex flex-col">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-xl font-semibold text-purple-400">Backups</h2>
+                <button onclick="hideBackupsModal()" class="btn btn-secondary btn-sm">Close</button>
+            </div>
+            <div id="backups-list" class="flex-1 overflow-y-auto space-y-2">
+                <!-- Populated by JS -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let folders = [];
+        let currentFolder = null;
+        let currentPath = '';
+
+        async function loadFolders() {
+            try {
+                const res = await fetch('/api/files/folders');
+                const data = await res.json();
+                folders = data.folders || [];
+                renderFolders();
+            } catch (e) {
+                showToast('Error loading folders', 'error');
+            }
+        }
+
+        function renderFolders() {
+            const container = document.getElementById('folders-list');
+            const noFolders = document.getElementById('no-folders');
+
+            if (folders.length === 0) {
+                container.innerHTML = '';
+                noFolders.classList.remove('hidden');
+                return;
+            }
+
+            noFolders.classList.add('hidden');
+            container.innerHTML = folders.map(f => {
+                const permClass = {
+                    'read_only': 'perm-readonly',
+                    'read_write': 'perm-readwrite',
+                    'no_access': 'perm-noaccess'
+                }[f.permission] || '';
+                const permLabel = {
+                    'read_only': 'R',
+                    'read_write': 'RW',
+                    'no_access': '-'
+                }[f.permission] || '?';
+                const isActive = currentFolder === f.id ? 'border-purple-500 bg-purple-900/20' : 'border-gray-700';
+
+                return `
+                    <div class="folder-card ${isActive}" onclick="selectFolder('${f.id}')">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center">
+                                <span class="text-xl mr-3">&#128193;</span>
+                                <div>
+                                    <div class="font-medium">${escapeHtml(f.name)}</div>
+                                    <div class="text-xs text-gray-500">${escapeHtml(f.id)}</div>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="text-sm font-medium ${permClass}">[${permLabel}]</span>
+                                <button onclick="event.stopPropagation(); showEditFolderModal('${f.id}')"
+                                        class="text-gray-400 hover:text-white">&#9998;</button>
+                            </div>
+                        </div>
+                        <div class="text-xs text-gray-500 mt-2 truncate">${escapeHtml(f.path)}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function selectFolder(folderId) {
+            currentFolder = folderId;
+            currentPath = '';
+            renderFolders();
+            loadFiles();
+        }
+
+        async function loadFiles() {
+            if (!currentFolder) return;
+
+            const folder = folders.find(f => f.id === currentFolder);
+            document.getElementById('browser-title').textContent = folder ? folder.name : 'File Browser';
+
+            try {
+                const res = await fetch(`/api/files/list?folder_id=${currentFolder}&path=${encodeURIComponent(currentPath)}`);
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Error loading files');
+                }
+                const data = await res.json();
+                renderFiles(data.files || []);
+                updateBreadcrumb();
+            } catch (e) {
+                document.getElementById('file-list').innerHTML = `
+                    <div class="text-red-400 text-center py-8">${escapeHtml(e.message)}</div>
+                `;
+            }
+        }
+
+        function renderFiles(files) {
+            const container = document.getElementById('file-list');
+            const navUp = document.getElementById('nav-up-btn');
+
+            navUp.classList.toggle('hidden', !currentPath);
+
+            if (files.length === 0) {
+                container.innerHTML = '<div class="text-gray-500 text-center py-8">Empty directory</div>';
+                return;
+            }
+
+            container.innerHTML = files.map(f => {
+                const icon = f.is_directory ? '&#128193;' : '&#128196;';
+                const size = f.is_directory ? '' : formatBytes(f.size_bytes);
+                const clickAction = f.is_directory
+                    ? `navigateTo('${escapeHtml(f.path)}')`
+                    : `viewFile('${escapeHtml(f.path)}')`;
+
+                return `
+                    <div class="file-row" onclick="${clickAction}">
+                        <div class="flex items-center">
+                            <span class="file-icon">${icon}</span>
+                            <span>${escapeHtml(f.name)}</span>
+                        </div>
+                        <span class="text-gray-500 text-sm">${size}</span>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function updateBreadcrumb() {
+            const container = document.getElementById('breadcrumb');
+            if (!currentPath) {
+                container.classList.add('hidden');
+                return;
+            }
+
+            container.classList.remove('hidden');
+            const parts = currentPath.split(/[\/\\]/).filter(Boolean);
+            let path = '';
+            const crumbs = [`<span class="cursor-pointer hover:text-purple-400" onclick="navigateTo('')">Root</span>`];
+
+            parts.forEach((part, i) => {
+                path += (i === 0 ? '' : '/') + part;
+                if (i === parts.length - 1) {
+                    crumbs.push(`<span class="text-gray-300">${escapeHtml(part)}</span>`);
+                } else {
+                    crumbs.push(`<span class="cursor-pointer hover:text-purple-400" onclick="navigateTo('${escapeHtml(path)}')">${escapeHtml(part)}</span>`);
+                }
+            });
+
+            container.innerHTML = crumbs.join(' / ');
+        }
+
+        function navigateTo(path) {
+            currentPath = path;
+            loadFiles();
+        }
+
+        function navigateUp() {
+            const parts = currentPath.split(/[\/\\]/).filter(Boolean);
+            parts.pop();
+            currentPath = parts.join('/');
+            loadFiles();
+        }
+
+        function refreshFiles() {
+            loadFiles();
+        }
+
+        async function viewFile(path) {
+            try {
+                const res = await fetch(`/api/files/read?folder_id=${currentFolder}&path=${encodeURIComponent(path)}`);
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Error reading file');
+                }
+                const data = await res.json();
+
+                document.getElementById('viewer-filename').textContent = path.split(/[\/\\]/).pop();
+                document.getElementById('file-content').textContent = data.content;
+                document.getElementById('file-viewer').classList.remove('hidden');
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+
+        function closeViewer() {
+            document.getElementById('file-viewer').classList.add('hidden');
+        }
+
+        // Folder CRUD
+        function showAddFolderModal() {
+            document.getElementById('add-folder-modal').classList.remove('hidden');
+        }
+
+        function hideAddFolderModal() {
+            document.getElementById('add-folder-modal').classList.add('hidden');
+            document.getElementById('folder-id').value = '';
+            document.getElementById('folder-path').value = '';
+            document.getElementById('folder-name').value = '';
+        }
+
+        async function addFolder(e) {
+            e.preventDefault();
+            const data = {
+                folder_id: document.getElementById('folder-id').value,
+                path: document.getElementById('folder-path').value,
+                name: document.getElementById('folder-name').value,
+                permission: document.getElementById('folder-permission').value,
+                backup_policy: document.getElementById('folder-backup').value
+            };
+
+            try {
+                const res = await fetch('/api/files/folders', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Error adding folder');
+                }
+
+                hideAddFolderModal();
+                loadFolders();
+                showToast('Folder added', 'success');
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+
+        function showEditFolderModal(folderId) {
+            const folder = folders.find(f => f.id === folderId);
+            if (!folder) return;
+
+            document.getElementById('edit-folder-id').value = folderId;
+            document.getElementById('edit-folder-name').value = folder.name;
+            document.getElementById('edit-folder-permission').value = folder.permission;
+            document.getElementById('edit-folder-backup').value = folder.backup_policy;
+            document.getElementById('edit-folder-modal').classList.remove('hidden');
+        }
+
+        function hideEditFolderModal() {
+            document.getElementById('edit-folder-modal').classList.add('hidden');
+        }
+
+        async function updateFolder(e) {
+            e.preventDefault();
+            const folderId = document.getElementById('edit-folder-id').value;
+            const data = {
+                name: document.getElementById('edit-folder-name').value,
+                permission: document.getElementById('edit-folder-permission').value,
+                backup_policy: document.getElementById('edit-folder-backup').value
+            };
+
+            try {
+                const res = await fetch(`/api/files/folders/${folderId}`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Error updating folder');
+                }
+
+                hideEditFolderModal();
+                loadFolders();
+                showToast('Folder updated', 'success');
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+
+        async function deleteFolder() {
+            const folderId = document.getElementById('edit-folder-id').value;
+            if (!confirm(`Delete folder "${folderId}"?`)) return;
+
+            try {
+                const res = await fetch(`/api/files/folders/${folderId}`, { method: 'DELETE' });
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Error deleting folder');
+                }
+
+                hideEditFolderModal();
+                if (currentFolder === folderId) {
+                    currentFolder = null;
+                    document.getElementById('file-list').innerHTML = '<div class="text-gray-500 text-center py-8">Select a folder to browse files</div>';
+                }
+                loadFolders();
+                showToast('Folder deleted', 'success');
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+
+        // Backups
+        async function loadBackupStats() {
+            try {
+                const res = await fetch('/api/files/backups/stats');
+                const stats = await res.json();
+                document.getElementById('backup-stats').innerHTML = `
+                    <div class="flex justify-between mb-1">
+                        <span>Total:</span>
+                        <span class="text-gray-300">${stats.total_backups}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span>Size:</span>
+                        <span class="text-gray-300">${stats.total_size_mb} MB</span>
+                    </div>
+                `;
+            } catch (e) {
+                document.getElementById('backup-stats').innerHTML = '<span class="text-red-400">Error loading stats</span>';
+            }
+        }
+
+        async function showBackupsModal() {
+            document.getElementById('backups-modal').classList.remove('hidden');
+
+            try {
+                const res = await fetch('/api/files/backups?limit=50');
+                const data = await res.json();
+                const backups = data.backups || [];
+
+                if (backups.length === 0) {
+                    document.getElementById('backups-list').innerHTML = '<div class="text-gray-500 text-center py-8">No backups</div>';
+                    return;
+                }
+
+                document.getElementById('backups-list').innerHTML = backups.map(b => `
+                    <div class="bg-gray-800 rounded p-3 flex items-center justify-between">
+                        <div>
+                            <div class="font-medium">${escapeHtml(b.original_path.split(/[\/\\]/).pop())}</div>
+                            <div class="text-xs text-gray-500">
+                                ${b.operation} | ${formatDate(b.created_at)} | ${formatBytes(b.file_size_bytes)}
+                            </div>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="restoreBackup('${b.id}')" class="btn btn-secondary btn-sm">Restore</button>
+                            <button onclick="deleteBackup('${b.id}')" class="btn btn-danger btn-sm">Delete</button>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (e) {
+                document.getElementById('backups-list').innerHTML = '<div class="text-red-400 text-center py-8">Error loading backups</div>';
+            }
+        }
+
+        function hideBackupsModal() {
+            document.getElementById('backups-modal').classList.add('hidden');
+        }
+
+        async function restoreBackup(backupId) {
+            if (!confirm('Restore this backup? This will overwrite the current file.')) return;
+
+            try {
+                const res = await fetch(`/api/files/backups/${backupId}/restore`, { method: 'POST' });
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Error restoring backup');
+                }
+
+                showToast('Backup restored', 'success');
+                if (currentFolder) loadFiles();
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+
+        async function deleteBackup(backupId) {
+            if (!confirm('Delete this backup?')) return;
+
+            try {
+                const res = await fetch(`/api/files/backups/${backupId}`, { method: 'DELETE' });
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Error deleting backup');
+                }
+
+                showToast('Backup deleted', 'success');
+                showBackupsModal(); // Refresh list
+                loadBackupStats();
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+
+        // Utilities
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+
+        function formatDate(dateStr) {
+            return new Date(dateStr).toLocaleString();
+        }
+
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            const toastMsg = document.getElementById('toast-message');
+
+            toast.className = 'fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg transition-all transform';
+
+            if (type === 'success') {
+                toast.classList.add('bg-green-800', 'text-green-100');
+            } else if (type === 'error') {
+                toast.classList.add('bg-red-800', 'text-red-100');
+            } else {
+                toast.classList.add('bg-gray-800', 'text-gray-100');
+            }
+
+            toastMsg.textContent = message;
+            toast.classList.remove('hidden', 'translate-y-2', 'opacity-0');
+
+            setTimeout(() => {
+                toast.classList.add('translate-y-2', 'opacity-0');
+                setTimeout(() => toast.classList.add('hidden'), 300);
+            }, 3000);
+        }
+
+        // Initialize
+        loadFolders();
+        loadBackupStats();
+    </script>
+</body>
+</html>

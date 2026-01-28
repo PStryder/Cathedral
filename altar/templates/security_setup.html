@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cathedral - Security Setup</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .input-field { @apply w-full px-4 py-3 bg-gray-800 border border-gray-600 rounded-lg text-gray-100 focus:border-purple-500 focus:outline-none text-lg; }
+        .btn { @apply px-6 py-3 rounded-lg font-medium transition-colors cursor-pointer; }
+        .btn-primary { @apply bg-purple-600 hover:bg-purple-700 text-white; }
+        .btn-secondary { @apply bg-gray-600 hover:bg-gray-700 text-white; }
+        .strength-weak { @apply bg-red-500; }
+        .strength-fair { @apply bg-yellow-500; }
+        .strength-good { @apply bg-blue-500; }
+        .strength-strong { @apply bg-green-500; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex items-center justify-center">
+    <div class="w-full max-w-md p-8">
+        <!-- Logo/Header -->
+        <div class="text-center mb-8">
+            <div class="text-6xl mb-4">&#9960;</div>
+            <h1 class="text-3xl font-bold text-purple-400">Cathedral</h1>
+            <p class="text-gray-400 mt-2">Protect Your Data</p>
+        </div>
+
+        <!-- Step 1: Choose encryption -->
+        <div id="step-choice" class="bg-gray-800 rounded-xl p-6 border border-gray-700">
+            <h2 class="text-xl font-semibold mb-4">Data Protection</h2>
+            <p class="text-gray-400 text-sm mb-6">
+                Cathedral can encrypt your messages, files, and API keys for additional security.
+            </p>
+
+            <div class="space-y-3 mb-6">
+                <label class="flex items-start gap-3 p-4 bg-gray-900 rounded-lg cursor-pointer border border-gray-700 hover:border-purple-500 transition-colors">
+                    <input type="radio" name="encryption" value="enable" class="mt-1" checked>
+                    <div>
+                        <div class="font-medium">Enable Encryption</div>
+                        <div class="text-sm text-gray-400">Protect sensitive data with a master password</div>
+                    </div>
+                </label>
+
+                <label class="flex items-start gap-3 p-4 bg-gray-900 rounded-lg cursor-pointer border border-gray-700 hover:border-purple-500 transition-colors">
+                    <input type="radio" name="encryption" value="skip" class="mt-1">
+                    <div>
+                        <div class="font-medium">Skip Encryption</div>
+                        <div class="text-sm text-gray-400">Use Cathedral without password protection</div>
+                    </div>
+                </label>
+            </div>
+
+            <button onclick="nextStep()" class="btn btn-primary w-full">Continue</button>
+        </div>
+
+        <!-- Step 2: Set password -->
+        <div id="step-password" class="bg-gray-800 rounded-xl p-6 border border-gray-700 hidden">
+            <h2 class="text-xl font-semibold mb-4">Create Master Password</h2>
+
+            <form onsubmit="enableEncryption(event)" class="space-y-4">
+                <div>
+                    <label class="block text-sm text-gray-400 mb-2">Master Password</label>
+                    <input type="password" id="password" required minlength="8"
+                           class="input-field" placeholder="Enter a strong password"
+                           oninput="checkStrength()">
+                    <div class="mt-2 h-1 bg-gray-700 rounded overflow-hidden">
+                        <div id="strength-bar" class="h-full w-0 transition-all"></div>
+                    </div>
+                    <div id="strength-text" class="text-xs text-gray-500 mt-1"></div>
+                </div>
+
+                <div>
+                    <label class="block text-sm text-gray-400 mb-2">Confirm Password</label>
+                    <input type="password" id="password-confirm" required minlength="8"
+                           class="input-field" placeholder="Confirm your password"
+                           oninput="checkMatch()">
+                    <div id="match-text" class="text-xs text-red-400 mt-1 hidden">Passwords do not match</div>
+                </div>
+
+                <div>
+                    <label class="block text-sm text-gray-400 mb-2">Security Level</label>
+                    <select id="security-tier" class="input-field">
+                        <option value="basic">Basic - Messages & Files encrypted</option>
+                        <option value="professional">Professional - Including embeddings</option>
+                        <option value="maximum">Maximum - Shortest timeout, full encryption</option>
+                    </select>
+                </div>
+
+                <label class="flex items-start gap-3 p-3 bg-gray-900 rounded-lg cursor-pointer">
+                    <input type="checkbox" id="understand" required class="mt-1">
+                    <div class="text-sm text-gray-400">
+                        I understand that if I forget my password, <strong class="text-red-400">all encrypted data will be permanently lost</strong>.
+                        There is no password recovery.
+                    </div>
+                </label>
+
+                <div class="pt-4 flex gap-3">
+                    <button type="button" onclick="backToChoice()" class="btn btn-secondary flex-1">Back</button>
+                    <button type="submit" id="enable-btn" class="btn btn-primary flex-1" disabled>Enable Encryption</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Step 3: Success -->
+        <div id="step-success" class="bg-gray-800 rounded-xl p-6 border border-gray-700 text-center hidden">
+            <div class="text-5xl text-green-400 mb-4">&#10004;</div>
+            <h2 class="text-xl font-semibold mb-2">Encryption Enabled</h2>
+            <p class="text-gray-400 mb-6">Your data is now protected. You'll need to enter your password when you start Cathedral.</p>
+            <a href="/" class="btn btn-primary inline-block">Continue to Cathedral</a>
+        </div>
+
+        <!-- Loading overlay -->
+        <div id="loading" class="fixed inset-0 bg-black/80 flex items-center justify-center hidden z-50">
+            <div class="text-center">
+                <div class="animate-spin w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+                <p class="text-gray-300">Setting up encryption...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function nextStep() {
+            const choice = document.querySelector('input[name="encryption"]:checked').value;
+
+            if (choice === 'skip') {
+                // Redirect to main app
+                window.location.href = '/';
+                return;
+            }
+
+            document.getElementById('step-choice').classList.add('hidden');
+            document.getElementById('step-password').classList.remove('hidden');
+        }
+
+        function backToChoice() {
+            document.getElementById('step-password').classList.add('hidden');
+            document.getElementById('step-choice').classList.remove('hidden');
+        }
+
+        function checkStrength() {
+            const password = document.getElementById('password').value;
+            const bar = document.getElementById('strength-bar');
+            const text = document.getElementById('strength-text');
+
+            let strength = 0;
+            let label = '';
+
+            if (password.length >= 8) strength++;
+            if (password.length >= 12) strength++;
+            if (/[a-z]/.test(password) && /[A-Z]/.test(password)) strength++;
+            if (/\d/.test(password)) strength++;
+            if (/[^a-zA-Z0-9]/.test(password)) strength++;
+
+            bar.className = 'h-full transition-all ';
+
+            if (strength <= 1) {
+                bar.classList.add('strength-weak');
+                bar.style.width = '20%';
+                label = 'Weak';
+            } else if (strength <= 2) {
+                bar.classList.add('strength-fair');
+                bar.style.width = '40%';
+                label = 'Fair';
+            } else if (strength <= 3) {
+                bar.classList.add('strength-good');
+                bar.style.width = '70%';
+                label = 'Good';
+            } else {
+                bar.classList.add('strength-strong');
+                bar.style.width = '100%';
+                label = 'Strong';
+            }
+
+            text.textContent = label;
+            updateSubmitButton();
+        }
+
+        function checkMatch() {
+            const password = document.getElementById('password').value;
+            const confirm = document.getElementById('password-confirm').value;
+            const matchText = document.getElementById('match-text');
+
+            if (confirm && password !== confirm) {
+                matchText.classList.remove('hidden');
+            } else {
+                matchText.classList.add('hidden');
+            }
+
+            updateSubmitButton();
+        }
+
+        function updateSubmitButton() {
+            const password = document.getElementById('password').value;
+            const confirm = document.getElementById('password-confirm').value;
+            const understand = document.getElementById('understand').checked;
+            const btn = document.getElementById('enable-btn');
+
+            btn.disabled = !(password.length >= 8 && password === confirm && understand);
+        }
+
+        document.getElementById('understand').addEventListener('change', updateSubmitButton);
+
+        async function enableEncryption(e) {
+            e.preventDefault();
+
+            const password = document.getElementById('password').value;
+            const tier = document.getElementById('security-tier').value;
+
+            document.getElementById('loading').classList.remove('hidden');
+
+            try {
+                const res = await fetch('/api/security/setup', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ password, tier })
+                });
+
+                if (res.ok) {
+                    document.getElementById('loading').classList.add('hidden');
+                    document.getElementById('step-password').classList.add('hidden');
+                    document.getElementById('step-success').classList.remove('hidden');
+                } else {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Setup failed');
+                }
+            } catch (e) {
+                document.getElementById('loading').classList.add('hidden');
+                alert('Error: ' + e.message);
+            }
+        }
+    </script>
+</body>
+</html>

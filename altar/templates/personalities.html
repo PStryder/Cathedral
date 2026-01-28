@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cathedral - Personalities</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .input-field { @apply w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-gray-100 focus:border-purple-500 focus:outline-none; }
+        .btn { @apply px-4 py-2 rounded font-medium transition-colors cursor-pointer; }
+        .btn-primary { @apply bg-purple-600 hover:bg-purple-700 text-white; }
+        .btn-secondary { @apply bg-gray-600 hover:bg-gray-700 text-white; }
+        .btn-danger { @apply bg-red-600 hover:bg-red-700 text-white; }
+        .btn-sm { @apply px-3 py-1 text-sm; }
+        .card { @apply bg-gray-800 rounded-lg p-4 border border-gray-700; }
+        .card:hover { @apply border-purple-500/50; }
+        .tag { @apply inline-block px-2 py-1 text-xs rounded bg-gray-700 text-gray-300 mr-1 mb-1; }
+        .tag-builtin { @apply bg-blue-900/50 text-blue-300; }
+        .modal-overlay { @apply fixed inset-0 bg-black/70 flex items-center justify-center z-50; }
+        .modal-content { @apply bg-gray-900 rounded-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-gray-700; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-6xl">
+        <!-- Header -->
+        <div class="flex justify-between items-center mb-8">
+            <div>
+                <h1 class="text-3xl font-bold text-purple-400">Personalities</h1>
+                <p class="text-gray-400 mt-1">Manage agent personalities and behaviors</p>
+            </div>
+            <div class="flex gap-3">
+                <button onclick="showCreateModal()" class="btn btn-primary">+ New Personality</button>
+                <a href="/" class="btn btn-secondary">Back to Chat</a>
+            </div>
+        </div>
+
+        <!-- Filter Bar -->
+        <div class="flex gap-4 mb-6">
+            <select id="category-filter" onchange="loadPersonalities()" class="input-field w-48">
+                <option value="">All Categories</option>
+            </select>
+            <label class="flex items-center gap-2 text-sm text-gray-400">
+                <input type="checkbox" id="show-builtins" checked onchange="loadPersonalities()" class="rounded">
+                Show Built-in
+            </label>
+        </div>
+
+        <!-- Personalities Grid -->
+        <div id="personalities-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <!-- Cards populated by JS -->
+        </div>
+    </div>
+
+    <!-- Create/Edit Modal -->
+    <div id="edit-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <form id="personality-form" onsubmit="savePersonality(event)">
+                <div class="p-6 border-b border-gray-700">
+                    <h2 id="modal-title" class="text-xl font-semibold text-purple-400">New Personality</h2>
+                </div>
+
+                <div class="p-6 space-y-4">
+                    <input type="hidden" id="edit-id" value="">
+
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Name</label>
+                        <input type="text" id="edit-name" required class="input-field" placeholder="My Custom Assistant">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Description</label>
+                        <input type="text" id="edit-description" class="input-field" placeholder="Brief description of this personality">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">System Prompt</label>
+                        <textarea id="edit-system-prompt" rows="6" class="input-field font-mono text-sm"
+                            placeholder="You are a helpful assistant..."></textarea>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm text-gray-400 mb-1">Model</label>
+                            <select id="edit-model" class="input-field">
+                                <option value="openai/gpt-4o-2024-11-20">GPT-4o</option>
+                                <option value="anthropic/claude-sonnet-4">Claude Sonnet 4</option>
+                                <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
+                                <option value="anthropic/claude-3-opus">Claude 3 Opus</option>
+                                <option value="google/gemini-pro-1.5">Gemini Pro 1.5</option>
+                                <option value="meta-llama/llama-3.1-405b-instruct">Llama 3.1 405B</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-400 mb-1">Category</label>
+                            <input type="text" id="edit-category" class="input-field" placeholder="custom">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm text-gray-400 mb-1">Temperature: <span id="temp-value">0.7</span></label>
+                            <input type="range" id="edit-temperature" min="0" max="2" step="0.1" value="0.7"
+                                oninput="document.getElementById('temp-value').textContent = this.value"
+                                class="w-full">
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-400 mb-1">Max Tokens</label>
+                            <input type="number" id="edit-max-tokens" value="4000" min="100" max="128000" class="input-field">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Style Tags (comma-separated)</label>
+                        <input type="text" id="edit-tags" class="input-field" placeholder="helpful, concise, technical">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Memory Domains (comma-separated)</label>
+                        <input type="text" id="edit-domains" class="input-field" placeholder="general, research">
+                    </div>
+                </div>
+
+                <div class="p-6 border-t border-gray-700 flex justify-between">
+                    <button type="button" onclick="closeModal()" class="btn btn-secondary">Cancel</button>
+                    <div class="flex gap-2">
+                        <button type="button" id="delete-btn" onclick="deletePersonality()" class="btn btn-danger hidden">Delete</button>
+                        <button type="submit" class="btn btn-primary">Save</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg hidden transition-all transform translate-y-2 opacity-0">
+        <span id="toast-message"></span>
+    </div>
+
+    <script>
+        let personalities = [];
+        let editingId = null;
+
+        async function loadPersonalities() {
+            try {
+                const category = document.getElementById('category-filter').value;
+                const includeBuiltins = document.getElementById('show-builtins').checked;
+
+                let url = `/api/personalities?include_builtins=${includeBuiltins}`;
+                if (category) url += `&category=${category}`;
+
+                const res = await fetch(url);
+                const data = await res.json();
+                personalities = data.personalities || [];
+
+                renderGrid();
+                loadCategories();
+            } catch (e) {
+                showToast('Error loading personalities: ' + e.message, 'error');
+            }
+        }
+
+        async function loadCategories() {
+            try {
+                const res = await fetch('/api/personalities/categories');
+                const data = await res.json();
+
+                const select = document.getElementById('category-filter');
+                const currentValue = select.value;
+
+                // Clear and rebuild options
+                select.innerHTML = '<option value="">All Categories</option>';
+                for (const cat of data.categories || []) {
+                    const option = document.createElement('option');
+                    option.value = cat;
+                    option.textContent = cat.charAt(0).toUpperCase() + cat.slice(1);
+                    select.appendChild(option);
+                }
+                select.value = currentValue;
+            } catch (e) {
+                console.error('Error loading categories:', e);
+            }
+        }
+
+        function renderGrid() {
+            const grid = document.getElementById('personalities-grid');
+            grid.innerHTML = '';
+
+            for (const p of personalities) {
+                const card = document.createElement('div');
+                card.className = 'card cursor-pointer';
+                card.onclick = () => showEditModal(p.id);
+
+                const tags = (p.style_tags || []).slice(0, 3).map(t =>
+                    `<span class="tag">${t}</span>`
+                ).join('');
+
+                card.innerHTML = `
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <h3 class="font-semibold text-lg text-gray-100">${p.name}</h3>
+                            <span class="text-xs text-gray-500">${p.id}</span>
+                        </div>
+                        ${p.is_builtin ? '<span class="tag tag-builtin">Built-in</span>' : ''}
+                        ${p.is_default ? '<span class="tag bg-purple-900/50 text-purple-300">Default</span>' : ''}
+                    </div>
+                    <p class="text-sm text-gray-400 mb-3 line-clamp-2">${p.description || 'No description'}</p>
+                    <div class="flex flex-wrap mb-2">${tags}</div>
+                    <div class="text-xs text-gray-500 flex justify-between">
+                        <span>${p.category}</span>
+                        <span>${p.usage_count || 0} uses</span>
+                    </div>
+                `;
+
+                grid.appendChild(card);
+            }
+
+            if (personalities.length === 0) {
+                grid.innerHTML = '<p class="text-gray-500 col-span-full text-center py-8">No personalities found</p>';
+            }
+        }
+
+        function showCreateModal() {
+            editingId = null;
+            document.getElementById('modal-title').textContent = 'New Personality';
+            document.getElementById('edit-id').value = '';
+            document.getElementById('edit-name').value = '';
+            document.getElementById('edit-description').value = '';
+            document.getElementById('edit-system-prompt').value = 'You are a helpful assistant.';
+            document.getElementById('edit-model').value = 'openai/gpt-4o-2024-11-20';
+            document.getElementById('edit-category').value = 'custom';
+            document.getElementById('edit-temperature').value = '0.7';
+            document.getElementById('temp-value').textContent = '0.7';
+            document.getElementById('edit-max-tokens').value = '4000';
+            document.getElementById('edit-tags').value = '';
+            document.getElementById('edit-domains').value = '';
+            document.getElementById('delete-btn').classList.add('hidden');
+            document.getElementById('edit-modal').classList.remove('hidden');
+        }
+
+        async function showEditModal(id) {
+            try {
+                const res = await fetch(`/api/personality/${id}`);
+                if (!res.ok) throw new Error('Not found');
+                const p = await res.json();
+
+                editingId = id;
+                document.getElementById('modal-title').textContent = p.metadata?.is_builtin ? `View: ${p.name}` : `Edit: ${p.name}`;
+                document.getElementById('edit-id').value = id;
+                document.getElementById('edit-name').value = p.name;
+                document.getElementById('edit-description').value = p.description || '';
+                document.getElementById('edit-system-prompt').value = p.llm_config?.system_prompt || '';
+                document.getElementById('edit-model').value = p.llm_config?.model || 'openai/gpt-4o-2024-11-20';
+                document.getElementById('edit-category').value = p.metadata?.category || 'custom';
+                document.getElementById('edit-temperature').value = p.llm_config?.temperature || 0.7;
+                document.getElementById('temp-value').textContent = p.llm_config?.temperature || 0.7;
+                document.getElementById('edit-max-tokens').value = p.llm_config?.max_tokens || 4000;
+                document.getElementById('edit-tags').value = (p.behavior?.style_tags || []).join(', ');
+                document.getElementById('edit-domains').value = (p.memory?.domains || []).join(', ');
+
+                // Show/hide delete button based on builtin status
+                const deleteBtn = document.getElementById('delete-btn');
+                if (p.metadata?.is_builtin) {
+                    deleteBtn.classList.add('hidden');
+                    // Make form read-only for builtins
+                    document.querySelectorAll('#personality-form input, #personality-form textarea, #personality-form select')
+                        .forEach(el => el.disabled = true);
+                } else {
+                    deleteBtn.classList.remove('hidden');
+                    document.querySelectorAll('#personality-form input, #personality-form textarea, #personality-form select')
+                        .forEach(el => el.disabled = false);
+                }
+
+                document.getElementById('edit-modal').classList.remove('hidden');
+            } catch (e) {
+                showToast('Error loading personality: ' + e.message, 'error');
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('edit-modal').classList.add('hidden');
+            editingId = null;
+        }
+
+        async function savePersonality(e) {
+            e.preventDefault();
+
+            const name = document.getElementById('edit-name').value.trim();
+            const description = document.getElementById('edit-description').value.trim();
+            const systemPrompt = document.getElementById('edit-system-prompt').value.trim();
+            const model = document.getElementById('edit-model').value;
+            const category = document.getElementById('edit-category').value.trim() || 'custom';
+            const temperature = parseFloat(document.getElementById('edit-temperature').value);
+            const maxTokens = parseInt(document.getElementById('edit-max-tokens').value);
+            const tags = document.getElementById('edit-tags').value.split(',').map(t => t.trim()).filter(t => t);
+            const domains = document.getElementById('edit-domains').value.split(',').map(d => d.trim()).filter(d => d);
+
+            try {
+                let res;
+                if (editingId) {
+                    // Update existing
+                    res = await fetch(`/api/personality/${editingId}`, {
+                        method: 'PUT',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            name,
+                            description,
+                            llm_config: {
+                                system_prompt: systemPrompt,
+                                model,
+                                temperature,
+                                max_tokens: maxTokens
+                            },
+                            behavior: { style_tags: tags },
+                            memory: { domains }
+                        })
+                    });
+                } else {
+                    // Create new
+                    res = await fetch('/api/personality', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            name,
+                            description,
+                            system_prompt: systemPrompt,
+                            model,
+                            temperature,
+                            max_tokens: maxTokens,
+                            style_tags: tags,
+                            memory_domains: domains,
+                            category
+                        })
+                    });
+                }
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Save failed');
+                }
+
+                showToast(editingId ? 'Personality updated' : 'Personality created', 'success');
+                closeModal();
+                loadPersonalities();
+            } catch (e) {
+                showToast('Error: ' + e.message, 'error');
+            }
+        }
+
+        async function deletePersonality() {
+            if (!editingId) return;
+            if (!confirm('Delete this personality?')) return;
+
+            try {
+                const res = await fetch(`/api/personality/${editingId}`, { method: 'DELETE' });
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Delete failed');
+                }
+
+                showToast('Personality deleted', 'success');
+                closeModal();
+                loadPersonalities();
+            } catch (e) {
+                showToast('Error: ' + e.message, 'error');
+            }
+        }
+
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            const toastMsg = document.getElementById('toast-message');
+
+            toast.className = 'fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg transition-all transform';
+
+            if (type === 'success') {
+                toast.classList.add('bg-green-800', 'text-green-100');
+            } else if (type === 'error') {
+                toast.classList.add('bg-red-800', 'text-red-100');
+            } else {
+                toast.classList.add('bg-gray-800', 'text-gray-100');
+            }
+
+            toastMsg.textContent = message;
+            toast.classList.remove('hidden', 'translate-y-2', 'opacity-0');
+
+            setTimeout(() => {
+                toast.classList.add('translate-y-2', 'opacity-0');
+                setTimeout(() => toast.classList.add('hidden'), 300);
+            }, 3000);
+        }
+
+        // Close modal on escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeModal();
+        });
+
+        // Close modal on backdrop click
+        document.getElementById('edit-modal').addEventListener('click', (e) => {
+            if (e.target.classList.contains('modal-overlay')) closeModal();
+        });
+
+        // Load on page ready
+        loadPersonalities();
+    </script>
+</body>
+</html>

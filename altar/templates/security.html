@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cathedral - Security Settings</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .input-field { @apply w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-gray-100 focus:border-purple-500 focus:outline-none; }
+        .btn { @apply px-4 py-2 rounded font-medium transition-colors cursor-pointer; }
+        .btn-primary { @apply bg-purple-600 hover:bg-purple-700 text-white; }
+        .btn-secondary { @apply bg-gray-600 hover:bg-gray-700 text-white; }
+        .btn-danger { @apply bg-red-600 hover:bg-red-700 text-white; }
+        .card { @apply bg-gray-800 rounded-lg p-6 border border-gray-700; }
+        .toggle-switch { @apply relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none; }
+        .toggle-dot { @apply inline-block h-4 w-4 transform rounded-full bg-white transition-transform; }
+        .status-locked { @apply text-red-400; }
+        .status-unlocked { @apply text-green-400; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-4xl">
+        <!-- Header -->
+        <div class="flex justify-between items-center mb-8">
+            <div>
+                <h1 class="text-3xl font-bold text-purple-400">Security Settings</h1>
+                <p class="text-gray-400 mt-1">Manage encryption and access controls</p>
+            </div>
+            <div class="flex gap-3">
+                <button onclick="lockNow()" id="lock-btn" class="btn btn-secondary hidden">
+                    &#128274; Lock Now
+                </button>
+                <a href="/" class="btn btn-secondary">Back to Chat</a>
+            </div>
+        </div>
+
+        <!-- Status Banner -->
+        <div id="status-banner" class="mb-6 p-4 rounded-lg border">
+            <!-- Populated by JS -->
+        </div>
+
+        <!-- Main Content -->
+        <div id="main-content" class="space-y-6">
+            <!-- Encryption Status -->
+            <div class="card">
+                <h2 class="text-lg font-semibold text-purple-400 mb-4">Encryption Status</h2>
+
+                <div id="encryption-disabled" class="hidden">
+                    <p class="text-gray-400 mb-4">
+                        Encryption is currently disabled. Your data is stored in plaintext.
+                    </p>
+                    <button onclick="location.href='/security/setup'" class="btn btn-primary">
+                        Enable Encryption
+                    </button>
+                </div>
+
+                <div id="encryption-enabled" class="hidden">
+                    <div class="flex items-center gap-3 mb-4">
+                        <span class="text-2xl">&#128274;</span>
+                        <div>
+                            <div class="font-medium text-green-400">Encryption Enabled</div>
+                            <div class="text-sm text-gray-500">Your data is protected</div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                            <span class="text-gray-500">Security Tier:</span>
+                            <span id="tier-display" class="ml-2 font-medium capitalize">Basic</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-500">Session Status:</span>
+                            <span id="session-status" class="ml-2 font-medium">Unlocked</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Encrypted Components -->
+            <div class="card" id="components-card">
+                <h2 class="text-lg font-semibold text-purple-400 mb-4">Encrypted Components</h2>
+                <p class="text-gray-500 text-sm mb-4">Select which data types to encrypt.</p>
+
+                <div id="components-list" class="space-y-3">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+
+            <!-- Session Settings -->
+            <div class="card" id="session-card">
+                <h2 class="text-lg font-semibold text-purple-400 mb-4">Session Settings</h2>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-2">Auto-lock Timeout</label>
+                        <select id="timeout-select" onchange="updateSessionSettings()" class="input-field w-48">
+                            <option value="5">5 minutes</option>
+                            <option value="15">15 minutes</option>
+                            <option value="30">30 minutes</option>
+                            <option value="60">1 hour</option>
+                            <option value="0">Never</option>
+                        </select>
+                    </div>
+
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <div class="font-medium">Lock on Idle</div>
+                            <div class="text-sm text-gray-500">Automatically lock when inactive</div>
+                        </div>
+                        <button type="button" onclick="toggleLockOnIdle()" id="lock-idle-toggle"
+                                class="toggle-switch bg-gray-600">
+                            <span class="toggle-dot translate-x-1"></span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Security Tier -->
+            <div class="card" id="tier-card">
+                <h2 class="text-lg font-semibold text-purple-400 mb-4">Security Tier</h2>
+                <p class="text-gray-500 text-sm mb-4">Quick presets for common security configurations.</p>
+
+                <div class="grid grid-cols-3 gap-4">
+                    <button onclick="setTier('basic')" class="tier-btn p-4 rounded-lg border border-gray-600 hover:border-purple-500 text-left" data-tier="basic">
+                        <div class="font-medium mb-1">Basic</div>
+                        <div class="text-xs text-gray-500">Messages, files, API keys</div>
+                        <div class="text-xs text-gray-500">30 min timeout</div>
+                    </button>
+
+                    <button onclick="setTier('professional')" class="tier-btn p-4 rounded-lg border border-gray-600 hover:border-purple-500 text-left" data-tier="professional">
+                        <div class="font-medium mb-1">Professional</div>
+                        <div class="text-xs text-gray-500">+ Embeddings</div>
+                        <div class="text-xs text-gray-500">15 min timeout</div>
+                    </button>
+
+                    <button onclick="setTier('maximum')" class="tier-btn p-4 rounded-lg border border-gray-600 hover:border-purple-500 text-left" data-tier="maximum">
+                        <div class="font-medium mb-1">Maximum</div>
+                        <div class="text-xs text-gray-500">Everything encrypted</div>
+                        <div class="text-xs text-gray-500">5 min timeout</div>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Change Password -->
+            <div class="card" id="password-card">
+                <h2 class="text-lg font-semibold text-purple-400 mb-4">Change Password</h2>
+
+                <form onsubmit="changePassword(event)" class="space-y-4">
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Current Password</label>
+                        <input type="password" id="current-password" required class="input-field">
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">New Password</label>
+                        <input type="password" id="new-password" required minlength="8" class="input-field">
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Confirm New Password</label>
+                        <input type="password" id="confirm-password" required class="input-field">
+                    </div>
+                    <button type="submit" class="btn btn-primary">Change Password</button>
+                </form>
+            </div>
+
+            <!-- Danger Zone -->
+            <div class="card border-red-900">
+                <h2 class="text-lg font-semibold text-red-400 mb-4">Danger Zone</h2>
+
+                <div class="space-y-4">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <div class="font-medium">Disable Encryption</div>
+                            <div class="text-sm text-gray-500">Decrypt all data and remove password protection</div>
+                        </div>
+                        <button onclick="showDisableModal()" class="btn btn-danger">Disable</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Locked State -->
+        <div id="locked-content" class="hidden">
+            <div class="card text-center py-12">
+                <div class="text-6xl text-gray-600 mb-4">&#128274;</div>
+                <h2 class="text-xl font-semibold mb-2">Session Locked</h2>
+                <p class="text-gray-500 mb-6">Unlock to view security settings</p>
+                <a href="/lock?redirect=/security" class="btn btn-primary">Unlock</a>
+            </div>
+        </div>
+
+        <!-- Toast -->
+        <div id="toast" class="fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg hidden transition-all transform translate-y-2 opacity-0">
+            <span id="toast-message"></span>
+        </div>
+    </div>
+
+    <!-- Disable Modal -->
+    <div id="disable-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 hidden">
+        <div class="bg-gray-900 rounded-xl p-6 w-full max-w-md border border-gray-700">
+            <h2 class="text-xl font-semibold text-red-400 mb-4">Disable Encryption</h2>
+            <p class="text-gray-400 text-sm mb-4">
+                This will decrypt all your data and remove password protection.
+                Enter your password to confirm.
+            </p>
+            <form onsubmit="disableEncryption(event)">
+                <input type="password" id="disable-password" required class="input-field mb-4" placeholder="Enter password">
+                <div class="flex gap-3">
+                    <button type="button" onclick="hideDisableModal()" class="btn btn-secondary flex-1">Cancel</button>
+                    <button type="submit" class="btn btn-danger flex-1">Disable Encryption</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let currentStatus = {};
+
+        async function loadStatus() {
+            try {
+                const res = await fetch('/api/security/status');
+                currentStatus = await res.json();
+                renderStatus();
+            } catch (e) {
+                showToast('Error loading status', 'error');
+            }
+        }
+
+        function renderStatus() {
+            const banner = document.getElementById('status-banner');
+            const mainContent = document.getElementById('main-content');
+            const lockedContent = document.getElementById('locked-content');
+            const lockBtn = document.getElementById('lock-btn');
+
+            if (!currentStatus.encryption_enabled) {
+                // Encryption disabled
+                banner.className = 'mb-6 p-4 rounded-lg border bg-yellow-900/30 border-yellow-700';
+                banner.innerHTML = `
+                    <div class="flex items-center gap-3">
+                        <span class="text-2xl">&#9888;</span>
+                        <div>
+                            <div class="font-medium text-yellow-400">Encryption Disabled</div>
+                            <div class="text-sm text-yellow-300/70">Your data is not protected by encryption</div>
+                        </div>
+                    </div>
+                `;
+                document.getElementById('encryption-disabled').classList.remove('hidden');
+                document.getElementById('encryption-enabled').classList.add('hidden');
+                document.getElementById('components-card').classList.add('hidden');
+                document.getElementById('session-card').classList.add('hidden');
+                document.getElementById('tier-card').classList.add('hidden');
+                document.getElementById('password-card').classList.add('hidden');
+                lockBtn.classList.add('hidden');
+                return;
+            }
+
+            if (currentStatus.session?.is_locked) {
+                // Locked
+                banner.className = 'mb-6 p-4 rounded-lg border bg-gray-800 border-gray-700';
+                banner.innerHTML = `
+                    <div class="flex items-center gap-3">
+                        <span class="text-2xl">&#128274;</span>
+                        <div>
+                            <div class="font-medium status-locked">Session Locked</div>
+                            <div class="text-sm text-gray-500">Unlock to access security settings</div>
+                        </div>
+                    </div>
+                `;
+                mainContent.classList.add('hidden');
+                lockedContent.classList.remove('hidden');
+                lockBtn.classList.add('hidden');
+                return;
+            }
+
+            // Unlocked
+            mainContent.classList.remove('hidden');
+            lockedContent.classList.add('hidden');
+            lockBtn.classList.remove('hidden');
+
+            banner.className = 'mb-6 p-4 rounded-lg border bg-green-900/30 border-green-700';
+            const timeLeft = currentStatus.session?.time_until_lock;
+            const timeText = timeLeft ? `Auto-lock in ${Math.ceil(timeLeft / 60)} minutes` : 'No auto-lock';
+            banner.innerHTML = `
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <span class="text-2xl">&#128275;</span>
+                        <div>
+                            <div class="font-medium status-unlocked">Session Unlocked</div>
+                            <div class="text-sm text-green-300/70">${timeText}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('encryption-disabled').classList.add('hidden');
+            document.getElementById('encryption-enabled').classList.remove('hidden');
+            document.getElementById('components-card').classList.remove('hidden');
+            document.getElementById('session-card').classList.remove('hidden');
+            document.getElementById('tier-card').classList.remove('hidden');
+            document.getElementById('password-card').classList.remove('hidden');
+
+            // Update tier display
+            document.getElementById('tier-display').textContent = currentStatus.security_tier || 'basic';
+            document.getElementById('session-status').textContent = 'Unlocked';
+            document.getElementById('session-status').className = 'ml-2 font-medium status-unlocked';
+
+            // Update timeout select
+            document.getElementById('timeout-select').value = currentStatus.session?.timeout_minutes || 30;
+
+            // Update lock on idle toggle
+            const lockIdleToggle = document.getElementById('lock-idle-toggle');
+            const isLockOnIdle = currentStatus.session?.lock_on_idle !== false;
+            if (isLockOnIdle) {
+                lockIdleToggle.classList.remove('bg-gray-600');
+                lockIdleToggle.classList.add('bg-purple-600');
+                lockIdleToggle.querySelector('.toggle-dot').classList.remove('translate-x-1');
+                lockIdleToggle.querySelector('.toggle-dot').classList.add('translate-x-5');
+            }
+
+            // Update tier buttons
+            document.querySelectorAll('.tier-btn').forEach(btn => {
+                if (btn.dataset.tier === currentStatus.security_tier) {
+                    btn.classList.add('border-purple-500', 'bg-purple-900/30');
+                } else {
+                    btn.classList.remove('border-purple-500', 'bg-purple-900/30');
+                }
+            });
+
+            // Render components
+            renderComponents();
+        }
+
+        function renderComponents() {
+            const container = document.getElementById('components-list');
+            const components = currentStatus.encrypted_components || {};
+
+            const labels = {
+                messages: 'Chat Messages',
+                scripture_files: 'Scripture Files',
+                scripture_metadata: 'Scripture Metadata',
+                agent_files: 'Agent Files',
+                api_keys: 'API Keys',
+                embeddings: 'Semantic Embeddings',
+                personalities: 'Personalities'
+            };
+
+            container.innerHTML = '';
+
+            for (const [key, label] of Object.entries(labels)) {
+                const enabled = components[key] !== false;
+                container.innerHTML += `
+                    <div class="flex items-center justify-between py-2">
+                        <span class="text-gray-300">${label}</span>
+                        <button type="button" onclick="toggleComponent('${key}')"
+                                class="toggle-switch ${enabled ? 'bg-purple-600' : 'bg-gray-600'}" data-component="${key}">
+                            <span class="toggle-dot ${enabled ? 'translate-x-5' : 'translate-x-1'}"></span>
+                        </button>
+                    </div>
+                `;
+            }
+        }
+
+        async function toggleComponent(component) {
+            const current = currentStatus.encrypted_components?.[component] !== false;
+            try {
+                await fetch('/api/security/settings', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ components: { [component]: !current } })
+                });
+                loadStatus();
+                showToast('Setting updated', 'success');
+            } catch (e) {
+                showToast('Error updating setting', 'error');
+            }
+        }
+
+        function toggleLockOnIdle() {
+            const current = currentStatus.session?.lock_on_idle !== false;
+            updateSessionSettings(!current);
+        }
+
+        async function updateSessionSettings(lockOnIdle = null) {
+            const timeout = parseInt(document.getElementById('timeout-select').value);
+            const body = { timeout_minutes: timeout };
+            if (lockOnIdle !== null) {
+                body.lock_on_idle = lockOnIdle;
+            }
+
+            try {
+                await fetch('/api/security/settings', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(body)
+                });
+                loadStatus();
+                showToast('Settings updated', 'success');
+            } catch (e) {
+                showToast('Error updating settings', 'error');
+            }
+        }
+
+        async function setTier(tier) {
+            try {
+                await fetch('/api/security/settings', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ tier })
+                });
+                loadStatus();
+                showToast('Security tier updated', 'success');
+            } catch (e) {
+                showToast('Error updating tier', 'error');
+            }
+        }
+
+        async function lockNow() {
+            try {
+                await fetch('/api/security/lock', { method: 'POST' });
+                loadStatus();
+            } catch (e) {
+                showToast('Error locking', 'error');
+            }
+        }
+
+        async function changePassword(e) {
+            e.preventDefault();
+
+            const current = document.getElementById('current-password').value;
+            const newPass = document.getElementById('new-password').value;
+            const confirm = document.getElementById('confirm-password').value;
+
+            if (newPass !== confirm) {
+                showToast('Passwords do not match', 'error');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/security/change-password', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ current_password: current, new_password: newPass })
+                });
+
+                if (res.ok) {
+                    showToast('Password changed successfully', 'success');
+                    document.getElementById('current-password').value = '';
+                    document.getElementById('new-password').value = '';
+                    document.getElementById('confirm-password').value = '';
+                } else {
+                    const err = await res.json();
+                    showToast(err.detail || 'Failed to change password', 'error');
+                }
+            } catch (e) {
+                showToast('Error changing password', 'error');
+            }
+        }
+
+        function showDisableModal() {
+            document.getElementById('disable-modal').classList.remove('hidden');
+        }
+
+        function hideDisableModal() {
+            document.getElementById('disable-modal').classList.add('hidden');
+            document.getElementById('disable-password').value = '';
+        }
+
+        async function disableEncryption(e) {
+            e.preventDefault();
+
+            const password = document.getElementById('disable-password').value;
+
+            try {
+                const res = await fetch('/api/security/disable', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ password })
+                });
+
+                if (res.ok) {
+                    showToast('Encryption disabled', 'success');
+                    hideDisableModal();
+                    loadStatus();
+                } else {
+                    const err = await res.json();
+                    showToast(err.detail || 'Failed to disable encryption', 'error');
+                }
+            } catch (e) {
+                showToast('Error', 'error');
+            }
+        }
+
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            const toastMsg = document.getElementById('toast-message');
+
+            toast.className = 'fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg transition-all transform';
+
+            if (type === 'success') {
+                toast.classList.add('bg-green-800', 'text-green-100');
+            } else if (type === 'error') {
+                toast.classList.add('bg-red-800', 'text-red-100');
+            } else {
+                toast.classList.add('bg-gray-800', 'text-gray-100');
+            }
+
+            toastMsg.textContent = message;
+            toast.classList.remove('hidden', 'translate-y-2', 'opacity-0');
+
+            setTimeout(() => {
+                toast.classList.add('translate-y-2', 'opacity-0');
+                setTimeout(() => toast.classList.add('hidden'), 300);
+            }, 3000);
+        }
+
+        // Refresh status periodically
+        setInterval(() => {
+            if (!document.hidden) loadStatus();
+        }, 30000);
+
+        // Load on page ready
+        loadStatus();
+    </script>
+</body>
+</html>

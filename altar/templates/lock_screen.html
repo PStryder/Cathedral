@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cathedral - Locked</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .input-field { @apply w-full px-4 py-3 bg-gray-800 border border-gray-600 rounded-lg text-gray-100 focus:border-purple-500 focus:outline-none text-lg; }
+        .btn { @apply px-6 py-3 rounded-lg font-medium transition-colors cursor-pointer; }
+        .btn-primary { @apply bg-purple-600 hover:bg-purple-700 text-white; }
+        .btn-secondary { @apply bg-gray-700 hover:bg-gray-600 text-gray-300; }
+        .shake {
+            animation: shake 0.5s ease-in-out;
+        }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-10px); }
+            40%, 80% { transform: translateX(10px); }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex items-center justify-center">
+    <div class="w-full max-w-md p-8">
+        <!-- Logo -->
+        <div class="text-center mb-8">
+            <div class="text-7xl mb-4 text-purple-400">&#128274;</div>
+            <h1 class="text-3xl font-bold text-purple-400">Cathedral</h1>
+            <p class="text-gray-500 mt-2">Session Locked</p>
+        </div>
+
+        <!-- Unlock Form -->
+        <div id="unlock-form" class="bg-gray-800 rounded-xl p-6 border border-gray-700">
+            <form onsubmit="unlock(event)">
+                <div class="mb-4">
+                    <label class="block text-sm text-gray-400 mb-2">Master Password</label>
+                    <input type="password" id="password" required autofocus
+                           class="input-field" placeholder="Enter your password">
+                    <div id="error-msg" class="text-red-400 text-sm mt-2 hidden">
+                        Incorrect password. Please try again.
+                    </div>
+                </div>
+
+                <button type="submit" id="unlock-btn" class="btn btn-primary w-full">
+                    Unlock
+                </button>
+            </form>
+
+            <div class="mt-6 pt-4 border-t border-gray-700 text-center">
+                <button onclick="showReset()" class="text-sm text-gray-500 hover:text-gray-400">
+                    Forgot password?
+                </button>
+            </div>
+        </div>
+
+        <!-- Reset Warning -->
+        <div id="reset-warning" class="bg-gray-800 rounded-xl p-6 border border-red-900 hidden">
+            <div class="text-center mb-4">
+                <div class="text-4xl text-red-400 mb-2">&#9888;</div>
+                <h2 class="text-xl font-semibold text-red-400">Password Cannot Be Recovered</h2>
+            </div>
+
+            <p class="text-gray-400 text-sm mb-4">
+                Your password is used to derive the encryption key. Without it, your encrypted data cannot be decrypted.
+            </p>
+
+            <div class="bg-red-900/30 border border-red-800 rounded-lg p-4 mb-4">
+                <p class="text-red-300 text-sm font-medium">
+                    If you reset Cathedral, ALL encrypted data will be permanently deleted:
+                </p>
+                <ul class="text-red-300 text-sm mt-2 list-disc list-inside">
+                    <li>All chat messages</li>
+                    <li>All stored files</li>
+                    <li>All memories and patterns</li>
+                    <li>All API keys</li>
+                </ul>
+            </div>
+
+            <div class="flex gap-3">
+                <button onclick="hideReset()" class="btn btn-secondary flex-1">
+                    Go Back
+                </button>
+                <button onclick="confirmReset()" class="btn bg-red-600 hover:bg-red-700 text-white flex-1">
+                    Reset Cathedral
+                </button>
+            </div>
+        </div>
+
+        <!-- Reset Confirmation -->
+        <div id="reset-confirm" class="bg-gray-800 rounded-xl p-6 border border-red-900 hidden">
+            <h2 class="text-xl font-semibold text-red-400 mb-4 text-center">Final Confirmation</h2>
+
+            <p class="text-gray-400 text-sm mb-4">
+                Type <code class="bg-gray-700 px-2 py-1 rounded">DELETE ALL DATA</code> to confirm:
+            </p>
+
+            <input type="text" id="confirm-text" class="input-field mb-4"
+                   placeholder="Type DELETE ALL DATA">
+
+            <div class="flex gap-3">
+                <button onclick="hideReset()" class="btn btn-secondary flex-1">
+                    Cancel
+                </button>
+                <button onclick="doReset()" id="reset-btn" class="btn bg-red-600 hover:bg-red-700 text-white flex-1" disabled>
+                    Delete Everything
+                </button>
+            </div>
+        </div>
+
+        <!-- Loading -->
+        <div id="loading" class="fixed inset-0 bg-black/80 flex items-center justify-center hidden z-50">
+            <div class="animate-spin w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full"></div>
+        </div>
+    </div>
+
+    <script>
+        // Check confirmation text
+        document.getElementById('confirm-text')?.addEventListener('input', function() {
+            document.getElementById('reset-btn').disabled = this.value !== 'DELETE ALL DATA';
+        });
+
+        async function unlock(e) {
+            e.preventDefault();
+
+            const password = document.getElementById('password').value;
+            const btn = document.getElementById('unlock-btn');
+            const errorMsg = document.getElementById('error-msg');
+            const form = document.getElementById('unlock-form');
+
+            btn.disabled = true;
+            btn.textContent = 'Unlocking...';
+            errorMsg.classList.add('hidden');
+
+            try {
+                const res = await fetch('/api/security/unlock', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ password })
+                });
+
+                if (res.ok) {
+                    // Redirect to main app or previous page
+                    const redirect = new URLSearchParams(window.location.search).get('redirect') || '/';
+                    window.location.href = redirect;
+                } else {
+                    // Wrong password
+                    errorMsg.classList.remove('hidden');
+                    form.classList.add('shake');
+                    setTimeout(() => form.classList.remove('shake'), 500);
+                    document.getElementById('password').value = '';
+                    document.getElementById('password').focus();
+                }
+            } catch (e) {
+                errorMsg.textContent = 'Connection error. Please try again.';
+                errorMsg.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Unlock';
+            }
+        }
+
+        function showReset() {
+            document.getElementById('unlock-form').classList.add('hidden');
+            document.getElementById('reset-warning').classList.remove('hidden');
+        }
+
+        function hideReset() {
+            document.getElementById('unlock-form').classList.remove('hidden');
+            document.getElementById('reset-warning').classList.add('hidden');
+            document.getElementById('reset-confirm').classList.add('hidden');
+        }
+
+        function confirmReset() {
+            document.getElementById('reset-warning').classList.add('hidden');
+            document.getElementById('reset-confirm').classList.remove('hidden');
+        }
+
+        async function doReset() {
+            if (document.getElementById('confirm-text').value !== 'DELETE ALL DATA') {
+                return;
+            }
+
+            document.getElementById('loading').classList.remove('hidden');
+
+            try {
+                const res = await fetch('/api/security/reset', {
+                    method: 'POST'
+                });
+
+                if (res.ok) {
+                    window.location.href = '/security/setup';
+                } else {
+                    alert('Reset failed. Please try again.');
+                }
+            } catch (e) {
+                alert('Connection error.');
+            } finally {
+                document.getElementById('loading').classList.add('hidden');
+            }
+        }
+
+        // Auto-focus password field
+        document.getElementById('password').focus();
+    </script>
+</body>
+</html>

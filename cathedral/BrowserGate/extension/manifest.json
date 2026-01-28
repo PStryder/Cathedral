@@ -1,0 +1,63 @@
+{
+  "manifest_version": 3,
+  "name": "Cathedral",
+  "version": "1.0.0",
+  "description": "Send web content to Cathedral - your local AI assistant",
+
+  "permissions": [
+    "activeTab",
+    "contextMenus",
+    "storage"
+  ],
+
+  "host_permissions": [
+    "http://localhost:8765/*",
+    "ws://localhost:8765/*"
+  ],
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_title": "Cathedral"
+  },
+
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+
+  "commands": {
+    "send-selection": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+C",
+        "mac": "Command+Shift+C"
+      },
+      "description": "Send selection to Cathedral"
+    },
+    "send-page": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+P",
+        "mac": "Command+Shift+P"
+      },
+      "description": "Send entire page to Cathedral"
+    }
+  }
+}

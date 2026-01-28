@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cathedral</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      width: 320px;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
+      color: #e0e7ff;
+    }
+
+    .header {
+      padding: 16px;
+      background: rgba(0, 0, 0, 0.2);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .header img {
+      width: 32px;
+      height: 32px;
+    }
+
+    .header h1 {
+      font-size: 18px;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .status {
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      background: rgba(0, 0, 0, 0.1);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #6b7280;
+    }
+
+    .status-dot.connected {
+      background: #10b981;
+      box-shadow: 0 0 8px #10b981;
+    }
+
+    .status-dot.error {
+      background: #ef4444;
+    }
+
+    .actions {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    button {
+      padding: 12px 16px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      transition: all 0.2s;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+    }
+
+    button:active {
+      transform: translateY(0);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: linear-gradient(135deg, #4f46e5, #7c3aed);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.1);
+      color: #e0e7ff;
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.15);
+    }
+
+    .btn-icon {
+      font-size: 16px;
+    }
+
+    .page-info {
+      padding: 12px 16px;
+      background: rgba(0, 0, 0, 0.15);
+      font-size: 12px;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .page-info .title {
+      font-weight: 500;
+      color: #fff;
+      margin-bottom: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .page-info .url {
+      color: #a5b4fc;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .shortcuts {
+      padding: 12px 16px;
+      font-size: 11px;
+      color: #a5b4fc;
+      background: rgba(0, 0, 0, 0.1);
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .shortcuts div {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+
+    .shortcuts kbd {
+      background: rgba(255, 255, 255, 0.1);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: monospace;
+    }
+
+    .feedback {
+      padding: 12px 16px;
+      text-align: center;
+      font-size: 13px;
+      color: #a5b4fc;
+      display: none;
+    }
+
+    .feedback.show {
+      display: block;
+    }
+
+    .feedback.success {
+      color: #10b981;
+    }
+
+    .feedback.error {
+      color: #ef4444;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <img src="icons/icon48.png" alt="Cathedral">
+    <h1>Cathedral</h1>
+  </div>
+
+  <div class="status" id="status">
+    <span class="status-dot" id="status-dot"></span>
+    <span id="status-text">Checking connection...</span>
+  </div>
+
+  <div class="page-info" id="page-info">
+    <div class="title" id="page-title">Loading...</div>
+    <div class="url" id="page-url"></div>
+  </div>
+
+  <div class="actions">
+    <button class="btn-primary" id="send-selection">
+      <span class="btn-icon">&#9998;</span>
+      Send Selection
+    </button>
+    <button class="btn-primary" id="send-page">
+      <span class="btn-icon">&#128196;</span>
+      Send Page Content
+    </button>
+    <button class="btn-secondary" id="save-scripture">
+      <span class="btn-icon">&#128218;</span>
+      Save as Scripture
+    </button>
+    <button class="btn-secondary" id="search-memory">
+      <span class="btn-icon">&#128270;</span>
+      Search Memory
+    </button>
+  </div>
+
+  <div class="feedback" id="feedback"></div>
+
+  <div class="shortcuts">
+    <div>
+      <span>Send Selection</span>
+      <kbd>Ctrl+Shift+C</kbd>
+    </div>
+    <div>
+      <span>Send Page</span>
+      <kbd>Ctrl+Shift+P</kbd>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

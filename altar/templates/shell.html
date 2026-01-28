@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cathedral - Shell</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .input-field { @apply w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-gray-100 focus:border-purple-500 focus:outline-none; }
+        .btn { @apply px-4 py-2 rounded font-medium transition-colors cursor-pointer; }
+        .btn-primary { @apply bg-purple-600 hover:bg-purple-700 text-white; }
+        .btn-secondary { @apply bg-gray-600 hover:bg-gray-700 text-white; }
+        .btn-danger { @apply bg-red-600 hover:bg-red-700 text-white; }
+        .btn-sm { @apply px-2 py-1 text-sm; }
+        .card { @apply bg-gray-800 rounded-lg p-6 border border-gray-700; }
+        .terminal { @apply bg-black font-mono text-green-400 text-sm p-4 rounded overflow-auto; }
+        .history-item { @apply px-3 py-2 hover:bg-gray-700/50 rounded cursor-pointer; }
+        .status-running { @apply text-yellow-400; }
+        .status-completed { @apply text-green-400; }
+        .status-failed { @apply text-red-400; }
+        .status-cancelled { @apply text-gray-400; }
+        .risk-low { @apply text-green-400; }
+        .risk-medium { @apply text-yellow-400; }
+        .risk-high { @apply text-red-400; }
+        .risk-blocked { @apply text-red-600; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-6xl">
+        <!-- Header -->
+        <div class="flex justify-between items-center mb-8">
+            <div>
+                <h1 class="text-3xl font-bold text-purple-400">Shell</h1>
+                <p class="text-gray-400 mt-1">Execute commands with security controls</p>
+            </div>
+            <div class="flex gap-3">
+                <a href="/" class="btn btn-secondary">Back to Chat</a>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-12 gap-6">
+            <!-- Left: Command Input & Output -->
+            <div class="col-span-8">
+                <!-- Command Input -->
+                <div class="card mb-4">
+                    <form onsubmit="executeCommand(event)" class="space-y-4">
+                        <div>
+                            <label class="block text-sm text-gray-400 mb-1">Command</label>
+                            <div class="flex gap-2">
+                                <input type="text" id="command-input" class="input-field flex-1"
+                                       placeholder="Enter command..." autocomplete="off"
+                                       oninput="validateCommand()">
+                                <button type="submit" id="execute-btn" class="btn btn-primary">Run</button>
+                                <button type="button" onclick="executeBackground()" class="btn btn-secondary">Background</button>
+                            </div>
+                        </div>
+                        <div id="command-validation" class="hidden">
+                            <!-- Populated by JS -->
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-400 mb-1">Working Directory (optional)</label>
+                            <input type="text" id="working-dir" class="input-field" placeholder="Leave empty for default">
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Terminal Output -->
+                <div class="card">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-lg font-semibold text-purple-400">Output</h2>
+                        <button onclick="clearOutput()" class="btn btn-secondary btn-sm">Clear</button>
+                    </div>
+                    <div id="terminal" class="terminal h-96">
+                        <span class="text-gray-500">Ready. Enter a command above.</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right: History & Running -->
+            <div class="col-span-4">
+                <!-- Running Commands -->
+                <div class="card mb-4">
+                    <h2 class="text-lg font-semibold text-purple-400 mb-4">Running</h2>
+                    <div id="running-list" class="space-y-2">
+                        <div class="text-gray-500 text-sm">No commands running</div>
+                    </div>
+                </div>
+
+                <!-- History -->
+                <div class="card">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-lg font-semibold text-purple-400">History</h2>
+                        <button onclick="clearHistory()" class="btn btn-danger btn-sm">Clear</button>
+                    </div>
+                    <div id="history-list" class="space-y-1 max-h-80 overflow-y-auto">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <!-- Config -->
+                <div class="card mt-4">
+                    <h2 class="text-lg font-semibold text-purple-400 mb-4">Settings</h2>
+                    <div class="space-y-3 text-sm">
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Default timeout:</span>
+                            <span id="config-timeout" class="text-gray-300">60s</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Max concurrent:</span>
+                            <span id="config-concurrent" class="text-gray-300">5</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Blocked commands:</span>
+                            <span id="config-blocked" class="text-gray-300">0</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast -->
+        <div id="toast" class="fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg hidden transition-all transform translate-y-2 opacity-0">
+            <span id="toast-message"></span>
+        </div>
+    </div>
+
+    <script>
+        let isExecuting = false;
+        let validateTimeout = null;
+
+        async function validateCommand() {
+            const cmd = document.getElementById('command-input').value.trim();
+            const container = document.getElementById('command-validation');
+
+            if (!cmd) {
+                container.classList.add('hidden');
+                return;
+            }
+
+            // Debounce
+            clearTimeout(validateTimeout);
+            validateTimeout = setTimeout(async () => {
+                try {
+                    const res = await fetch(`/api/shell/validate?command=${encodeURIComponent(cmd)}`);
+                    const data = await res.json();
+
+                    container.classList.remove('hidden');
+
+                    if (data.risk.is_blocked) {
+                        container.innerHTML = `
+                            <div class="flex items-center gap-2 text-red-400">
+                                <span>&#9888;</span>
+                                <span>Blocked: ${escapeHtml(data.error || 'Command not allowed')}</span>
+                            </div>
+                        `;
+                        document.getElementById('execute-btn').disabled = true;
+                    } else {
+                        const riskClass = 'risk-' + data.risk.risk_level;
+                        const warnings = data.risk.warnings || [];
+                        let html = `<div class="flex items-center gap-2 ${riskClass}">`;
+
+                        if (data.risk.risk_level === 'low') {
+                            html += `<span>&#10003;</span><span>Low risk</span>`;
+                        } else if (data.risk.risk_level === 'medium') {
+                            html += `<span>&#9888;</span><span>Medium risk</span>`;
+                        } else {
+                            html += `<span>&#9888;</span><span>High risk</span>`;
+                        }
+
+                        if (warnings.length > 0) {
+                            html += `<span class="text-gray-500 text-sm ml-2">(${warnings.join(', ')})</span>`;
+                        }
+
+                        html += '</div>';
+                        container.innerHTML = html;
+                        document.getElementById('execute-btn').disabled = false;
+                    }
+                } catch (e) {
+                    container.classList.add('hidden');
+                }
+            }, 300);
+        }
+
+        async function executeCommand(e) {
+            e.preventDefault();
+            if (isExecuting) return;
+
+            const cmd = document.getElementById('command-input').value.trim();
+            if (!cmd) return;
+
+            const workingDir = document.getElementById('working-dir').value.trim() || null;
+
+            isExecuting = true;
+            const terminal = document.getElementById('terminal');
+            terminal.innerHTML = `<span class="text-gray-500">$ ${escapeHtml(cmd)}</span>\n<span class="status-running">Running...</span>\n`;
+
+            try {
+                const response = await fetch('/api/shell/stream', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({command: cmd, working_dir: workingDir})
+                });
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                terminal.innerHTML = `<span class="text-gray-500">$ ${escapeHtml(cmd)}</span>\n`;
+
+                let buffer = '';
+                while (true) {
+                    const {done, value} = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, {stream: true});
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
+                                if (data.output) {
+                                    terminal.innerHTML += escapeHtml(data.output);
+                                }
+                                if (data.error) {
+                                    terminal.innerHTML += `<span class="text-red-400">${escapeHtml(data.error)}</span>\n`;
+                                }
+                            } catch {}
+                        }
+                    }
+                    terminal.scrollTop = terminal.scrollHeight;
+                }
+
+                loadHistory();
+            } catch (e) {
+                terminal.innerHTML += `<span class="text-red-400">Error: ${escapeHtml(e.message)}</span>\n`;
+            }
+
+            isExecuting = false;
+        }
+
+        async function executeBackground() {
+            const cmd = document.getElementById('command-input').value.trim();
+            if (!cmd) return;
+
+            const workingDir = document.getElementById('working-dir').value.trim() || null;
+
+            try {
+                const res = await fetch('/api/shell/background', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({command: cmd, working_dir: workingDir})
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Error starting command');
+                }
+
+                const data = await res.json();
+                showToast(`Background command started: ${data.id}`, 'success');
+                document.getElementById('command-input').value = '';
+                loadRunning();
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+
+        async function loadRunning() {
+            try {
+                const res = await fetch('/api/shell/running');
+                const data = await res.json();
+                const running = data.running || [];
+
+                const container = document.getElementById('running-list');
+
+                if (running.length === 0) {
+                    container.innerHTML = '<div class="text-gray-500 text-sm">No commands running</div>';
+                    return;
+                }
+
+                container.innerHTML = running.map(r => `
+                    <div class="bg-gray-700/50 rounded p-2 text-sm">
+                        <div class="flex items-center justify-between">
+                            <span class="font-mono text-xs">${r.id}</span>
+                            <button onclick="cancelCommand('${r.id}')" class="btn btn-danger btn-sm">Cancel</button>
+                        </div>
+                        <div class="text-gray-400 text-xs mt-1 truncate">${escapeHtml(r.command)}</div>
+                    </div>
+                `).join('');
+            } catch (e) {
+                console.error('Error loading running:', e);
+            }
+        }
+
+        async function cancelCommand(execId) {
+            try {
+                const res = await fetch(`/api/shell/cancel/${execId}`, {method: 'POST'});
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Error cancelling');
+                }
+                showToast('Command cancelled', 'success');
+                loadRunning();
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+
+        async function loadHistory() {
+            try {
+                const res = await fetch('/api/shell/history?limit=20');
+                const data = await res.json();
+                const history = data.history || [];
+
+                const container = document.getElementById('history-list');
+
+                if (history.length === 0) {
+                    container.innerHTML = '<div class="text-gray-500 text-sm">No history</div>';
+                    return;
+                }
+
+                container.innerHTML = history.map(h => {
+                    const icon = h.success ? '&#10003;' : '&#10007;';
+                    const iconClass = h.success ? 'text-green-400' : 'text-red-400';
+
+                    return `
+                        <div class="history-item" onclick="rerunCommand('${escapeHtml(h.command)}')">
+                            <div class="flex items-center gap-2">
+                                <span class="${iconClass}">${icon}</span>
+                                <span class="font-mono text-xs truncate">${escapeHtml(h.command)}</span>
+                            </div>
+                            <div class="text-gray-500 text-xs mt-1">${h.duration_seconds.toFixed(1)}s</div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (e) {
+                console.error('Error loading history:', e);
+            }
+        }
+
+        function rerunCommand(cmd) {
+            document.getElementById('command-input').value = cmd;
+            validateCommand();
+        }
+
+        async function clearHistory() {
+            if (!confirm('Clear all command history?')) return;
+
+            try {
+                await fetch('/api/shell/history', {method: 'DELETE'});
+                loadHistory();
+                showToast('History cleared', 'success');
+            } catch (e) {
+                showToast('Error clearing history', 'error');
+            }
+        }
+
+        function clearOutput() {
+            document.getElementById('terminal').innerHTML = '<span class="text-gray-500">Ready. Enter a command above.</span>';
+        }
+
+        async function loadConfig() {
+            try {
+                const res = await fetch('/api/shell/config');
+                const config = await res.json();
+                const cmdConfig = config.command_config || {};
+
+                document.getElementById('config-timeout').textContent = (cmdConfig.default_timeout_seconds || 60) + 's';
+                document.getElementById('config-concurrent').textContent = cmdConfig.max_concurrent_background || 5;
+                document.getElementById('config-blocked').textContent = (cmdConfig.blocked_commands || []).length;
+            } catch (e) {
+                console.error('Error loading config:', e);
+            }
+        }
+
+        // Utilities
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            const toastMsg = document.getElementById('toast-message');
+
+            toast.className = 'fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg transition-all transform';
+
+            if (type === 'success') {
+                toast.classList.add('bg-green-800', 'text-green-100');
+            } else if (type === 'error') {
+                toast.classList.add('bg-red-800', 'text-red-100');
+            } else {
+                toast.classList.add('bg-gray-800', 'text-gray-100');
+            }
+
+            toastMsg.textContent = message;
+            toast.classList.remove('hidden', 'translate-y-2', 'opacity-0');
+
+            setTimeout(() => {
+                toast.classList.add('translate-y-2', 'opacity-0');
+                setTimeout(() => toast.classList.add('hidden'), 300);
+            }, 3000);
+        }
+
+        // Poll for running commands
+        setInterval(() => {
+            if (!document.hidden) loadRunning();
+        }, 5000);
+
+        // Initialize
+        loadHistory();
+        loadRunning();
+        loadConfig();
+    </script>
+</body>
+</html>
