@@ -1,8 +1,7 @@
 """
 Shared utilities for Cathedral.
 
-Provides backend-agnostic access to common functionality that works
-regardless of the configured conversation backend (Loom or MemoryGate).
+Provides access to common functionality used by conversation services.
 """
 
 from cathedral.shared.db import (

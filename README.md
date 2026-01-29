@@ -37,7 +37,7 @@ Cathedral is organized into "Gates" - modular subsystems that can be enabled/dis
 | Gate | Purpose |
 |------|---------|
 | **StarMirror** | LLM interface (OpenRouter API, 40+ models) |
-| **Loom** | Conversation memory with semantic search |
+| **Conversation** | Conversation memory with semantic search (MemoryGate) |
 | **MemoryGate** | Knowledge system (observations, concepts, patterns) |
 | **ScriptureGate** | Document library and RAG |
 | **PersonalityGate** | Agent personality management |
@@ -184,11 +184,10 @@ See the full API documentation at `/docs` when the server is running.
 
 ## Database Schema
 
-### Loom (Conversation Memory)
+### Conversation Memory (MemoryGate)
 - `threads` - Conversation threads
 - `messages` - Chat messages with embeddings
 - `summaries` - Thread summaries
-- `facts` - Extracted facts
 
 ### MemoryGate (Knowledge)
 - `observations` - Stored facts

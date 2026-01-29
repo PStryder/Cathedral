@@ -1,7 +1,7 @@
 """
 Conversation models for MemoryGate.
 
-Provides SQLAlchemy models for conversation memory, replacing Loom's models
+Provides SQLAlchemy models for conversation memory, replacing legacy models
 with a unified implementation under MemoryGate.
 """
 
@@ -34,7 +34,7 @@ class ConversationThread(Base):
     Conversation thread.
 
     A thread represents a conversation session with multiple messages.
-    Maps to the legacy loom_threads table for migration compatibility.
+    Maps to legacy thread tables for migration compatibility.
     """
     __tablename__ = "mg_conversation_threads"
 

@@ -6,19 +6,11 @@ Provides a single interface for:
 - Knowledge memory (observations, patterns, concepts) via MemoryGate
 - Cross-system search and context composition
 
-Phase 1: Abstraction layer wrapping both systems [COMPLETE]
-Phase 2: Migration to MemoryGate backend [CURRENT]
-Phase 3: Loom removal (after migration verified)
-
-The conversation backend is configurable via CONVERSATION_BACKEND environment
-variable: "loom" (legacy) or "memorygate" (new default).
+Conversation storage is provided by the MemoryGate conversation service.
 """
 
-import os
 import asyncio
 from typing import Optional, List, Dict, Any
-from datetime import datetime
-from enum import Enum
 
 from .types import (
     MemorySource,
@@ -29,27 +21,10 @@ from .types import (
 )
 
 
-class ConversationBackend(str, Enum):
-    """Available conversation backends."""
-    LOOM = "loom"
-    MEMORYGATE = "memorygate"
-
-
-# Configuration: which backend to use for conversations
-# Default to memorygate (Phase 2), can be overridden for migration testing
-CONVERSATION_BACKEND = ConversationBackend(
-    os.environ.get("CONVERSATION_BACKEND", "memorygate").lower()
-)
-
-
 def _get_conversation_service():
-    """Get the appropriate conversation service based on backend config."""
-    if CONVERSATION_BACKEND == ConversationBackend.LOOM:
-        from loom import Loom
-        return Loom()
-    else:
-        from cathedral.MemoryGate.conversation import get_conversation_service
-        return get_conversation_service()
+    """Get the MemoryGate conversation service."""
+    from cathedral.MemoryGate.conversation import get_conversation_service
+    return get_conversation_service()
 
 
 def _get_memorygate():
@@ -64,10 +39,6 @@ class UnifiedMemory:
 
     Combines conversation context with knowledge memory (MemoryGate)
     into a single coherent interface.
-
-    The conversation backend is configurable:
-    - CONVERSATION_BACKEND=loom: Use legacy Loom (Phase 1)
-    - CONVERSATION_BACKEND=memorygate: Use MemoryGate conversation (Phase 2+)
 
     Usage:
         memory = UnifiedMemory()
@@ -85,27 +56,20 @@ class UnifiedMemory:
         all_results = await memory.unified_search("important topic")
     """
 
-    def __init__(self, backend: ConversationBackend = None):
+    def __init__(self, conversation: Any = None):
         """
         Initialize UnifiedMemory.
 
         Args:
-            backend: Override the default conversation backend
+            conversation: Optional conversation service override (for testing)
         """
-        self._backend = backend or CONVERSATION_BACKEND
-        self._conversation = _get_conversation_service()
-        self._is_loom = self._backend == ConversationBackend.LOOM
+        self._conversation = conversation or _get_conversation_service()
 
         # Initialize MemoryGate for knowledge operations
         MemoryGate = _get_memorygate()
         self._mg_initialized = MemoryGate.is_initialized()
         if not self._mg_initialized:
             self._mg_initialized = MemoryGate.initialize()
-
-    @property
-    def conversation_backend(self) -> ConversationBackend:
-        """Get the current conversation backend."""
-        return self._backend
 
     # ==========================================================================
     # Conversation Layer
@@ -126,10 +90,7 @@ class UnifiedMemory:
         Returns:
             Thread UID
         """
-        if self._is_loom:
-            return self._conversation.create_new_thread(thread_name)
-        else:
-            return self._conversation.create_thread(thread_name)
+        return self._conversation.create_thread(thread_name)
 
     async def append_message(
         self,
@@ -150,10 +111,7 @@ class UnifiedMemory:
         Returns:
             Message UID
         """
-        if self._is_loom:
-            message_uid = await self._conversation.append_async(role, content, thread_uid)
-        else:
-            message_uid = await self._conversation.append_async(role, content, thread_uid)
+        message_uid = await self._conversation.append_async(role, content, thread_uid)
 
         # Optionally extract observations from assistant responses
         if extract_memory and role == "assistant" and self._mg_initialized:
@@ -178,10 +136,7 @@ class UnifiedMemory:
         Returns:
             List of message dicts with role, content, timestamp
         """
-        if self._is_loom:
-            messages = await self._conversation.recall_async(thread_uid)
-        else:
-            messages = await self._conversation.recall_async(thread_uid)
+        messages = await self._conversation.recall_async(thread_uid)
 
         if limit and len(messages) > limit:
             messages = messages[-limit:]
@@ -220,7 +175,7 @@ class UnifiedMemory:
             similarity = r.get("similarity", 0.0)
             if similarity >= min_similarity:
                 search_results.append(
-                    SearchResult.from_loom_message(r, similarity)
+                    SearchResult.from_conversation_message(r, similarity)
                 )
 
         return search_results
@@ -249,7 +204,7 @@ class UnifiedMemory:
             similarity = r.get("similarity", 0.0)
             if similarity >= min_similarity:
                 search_results.append(
-                    SearchResult.from_loom_summary(r, similarity)
+                    SearchResult.from_conversation_summary(r, similarity)
                 )
 
         return search_results
@@ -482,14 +437,9 @@ class UnifiedMemory:
             Message list ready for LLM (role/content dicts)
         """
         # Get conversation context
-        if self._is_loom:
-            context = await self._conversation.compose_prompt_context_async(
-                user_input, thread_uid
-            )
-        else:
-            context = await self._conversation.compose_context(
-                user_input, thread_uid
-            )
+        context = await self._conversation.compose_context(
+            user_input, thread_uid
+        )
 
         # Inject relevant knowledge if enabled
         if include_knowledge and self._mg_initialized:
@@ -518,17 +468,11 @@ class UnifiedMemory:
 
     def list_threads(self) -> List[Dict]:
         """List all conversation threads."""
-        if self._is_loom:
-            return self._conversation.list_all_threads()
-        else:
-            return self._conversation.list_threads()
+        return self._conversation.list_threads()
 
     def switch_thread(self, thread_uid: str) -> None:
         """Switch active thread."""
-        if self._is_loom:
-            self._conversation.switch_to_thread(thread_uid)
-        else:
-            self._conversation.switch_thread(thread_uid)
+        self._conversation.switch_thread(thread_uid)
 
     def get_active_thread(self) -> str:
         """Get active thread UID."""
@@ -536,10 +480,7 @@ class UnifiedMemory:
 
     def get_active_thread_metadata(self) -> Dict:
         """Get metadata for the active thread."""
-        if self._is_loom:
-            return self._conversation.get_active_thread_metadata()
-        else:
-            return self._conversation.get_active_thread() or {}
+        return self._conversation.get_active_thread() or {}
 
     def clear_thread(self, thread_uid: str = None) -> None:
         """Clear messages from a thread."""
@@ -557,20 +498,16 @@ class UnifiedMemory:
             MemoryStats with counts from both systems
         """
         stats = MemoryStats(
-            loom_available=True,
+            conversation_available=True,
             memorygate_available=self._mg_initialized
         )
 
         # Get conversation stats
-        if self._is_loom:
-            threads = self._conversation.list_all_threads()
-            stats.thread_count = len(threads)
-        else:
-            conv_stats = self._conversation.get_stats()
-            stats.thread_count = conv_stats.get("threads", 0)
-            stats.message_count = conv_stats.get("messages", 0)
-            stats.embedded_message_count = conv_stats.get("embedded", 0)
-            stats.summary_count = conv_stats.get("summaries", 0)
+        conv_stats = self._conversation.get_stats()
+        stats.thread_count = conv_stats.get("threads", 0)
+        stats.message_count = conv_stats.get("messages", 0)
+        stats.embedded_message_count = conv_stats.get("embedded", 0)
+        stats.summary_count = conv_stats.get("summaries", 0)
 
         # Get MemoryGate stats
         if self._mg_initialized:
@@ -688,10 +625,7 @@ class UnifiedMemory:
         Returns:
             Number of embeddings generated
         """
-        if self._is_loom:
-            return await self._conversation.backfill_embeddings(batch_size)
-        else:
-            return await self._conversation.backfill_embeddings(batch_size)
+        return await self._conversation.backfill_embeddings(batch_size)
 
 
 # ==========================================================================
@@ -701,16 +635,16 @@ class UnifiedMemory:
 _memory: Optional[UnifiedMemory] = None
 
 
-def get_memory(backend: ConversationBackend = None) -> UnifiedMemory:
+def get_memory(conversation: Any = None) -> UnifiedMemory:
     """
     Get or create global UnifiedMemory instance.
 
     Args:
-        backend: Override the default conversation backend
+        conversation: Optional conversation service override (for testing)
     """
     global _memory
     if _memory is None:
-        _memory = UnifiedMemory(backend)
+        _memory = UnifiedMemory(conversation)
     return _memory
 
 
@@ -718,18 +652,6 @@ def reset_memory() -> None:
     """Reset the global memory instance (mainly for testing)."""
     global _memory
     _memory = None
-
-
-def set_conversation_backend(backend: ConversationBackend) -> None:
-    """
-    Set the conversation backend and reset the memory instance.
-
-    Args:
-        backend: The backend to use (loom or memorygate)
-    """
-    global CONVERSATION_BACKEND
-    CONVERSATION_BACKEND = backend
-    reset_memory()
 
 
 # Convenience async functions
@@ -761,11 +683,8 @@ async def store_observation(observation: str, **kwargs) -> Optional[Dict]:
 # Export types
 __all__ = [
     "UnifiedMemory",
-    "ConversationBackend",
-    "CONVERSATION_BACKEND",
     "get_memory",
     "reset_memory",
-    "set_conversation_backend",
     "compose_context",
     "append_message",
     "unified_search",

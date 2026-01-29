@@ -96,6 +96,13 @@ async def process_input_stream(
         services=services,
     )
 
+    # Block commands and chat while locked (allow security/lock helpers)
+    if SecurityManager.is_locked():
+        allowed = ("/lock", "/security", "/security-status")
+        if not any(lowered == cmd or lowered.startswith(cmd + " ") for cmd in allowed):
+            yield "Session is locked. Please unlock at /lock to continue."
+            return
+
     # Handle pre-completion commands (no streaming for these)
     handler = await handle_pre_command(command, lowered, ctx)
     if handler:
@@ -114,12 +121,7 @@ async def process_input_stream(
             yield token
         return
 
-    # Check if session is locked - if so, can't process chat
-    if SecurityManager.is_locked():
-        yield "Session is locked. Please unlock at /lock to continue."
-        return
-
-    # Append user message to Loom thread history (async with embedding)
+    # Append user message to conversation history (async with embedding)
     await loom.append_async("user", user_input, thread_uid=thread_uid)
 
     # Load personality for this thread
@@ -156,7 +158,7 @@ async def process_input_stream(
         full_response += token
         yield token
 
-    # Store complete assistant response in Loom thread (async with embedding)
+    # Store complete assistant response in conversation history (async with embedding)
     await loom.append_async("assistant", full_response, thread_uid=thread_uid)
 
     # Extract and store memory from this exchange

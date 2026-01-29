@@ -21,7 +21,7 @@ except ImportError:
 
 Base = declarative_base()
 
-# Embedding dimension (same as Loom)
+# Embedding dimension (same as conversation embeddings)
 EMBEDDING_DIM = 1536
 
 

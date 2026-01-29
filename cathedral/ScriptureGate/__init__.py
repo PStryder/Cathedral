@@ -9,7 +9,7 @@ Provides:
 - RAG-lite context injection
 
 All binary content lives here, with searchable indexes in PostgreSQL.
-Other systems (Loom, MemoryGate) reference scriptures via refs.
+Other systems (conversation memory, MemoryGate) reference scriptures via refs.
 """
 
 import os

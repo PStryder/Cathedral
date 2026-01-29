@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from loom import Loom
-
 from cathedral.Memory import get_memory
+from cathedral.conversation import ConversationAdapter
 
 
-loom = Loom()
+loom = ConversationAdapter()
 memory = get_memory()
 
 # Thread-personality associations (in-memory, could be persisted)

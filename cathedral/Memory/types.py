@@ -31,7 +31,7 @@ class SearchResult:
     """
     Unified search result from any memory source.
 
-    Provides a common structure for results from Loom (conversations)
+    Provides a common structure for results from conversation memory
     and MemoryGate (observations, patterns, concepts, documents).
     """
     source: MemorySource
@@ -61,8 +61,8 @@ class SearchResult:
         }
 
     @classmethod
-    def from_loom_message(cls, msg: Dict[str, Any], similarity: float = 0.0) -> "SearchResult":
-        """Create from Loom message dict."""
+    def from_conversation_message(cls, msg: Dict[str, Any], similarity: float = 0.0) -> "SearchResult":
+        """Create from conversation message dict."""
         return cls(
             source=MemorySource.CONVERSATION,
             content=msg.get("content", ""),
@@ -76,8 +76,8 @@ class SearchResult:
         )
 
     @classmethod
-    def from_loom_summary(cls, summary: Dict[str, Any], similarity: float = 0.0) -> "SearchResult":
-        """Create from Loom summary dict."""
+    def from_conversation_summary(cls, summary: Dict[str, Any], similarity: float = 0.0) -> "SearchResult":
+        """Create from conversation summary dict."""
         return cls(
             source=MemorySource.SUMMARY,
             content=summary.get("summary_text", ""),
@@ -88,6 +88,17 @@ class SearchResult:
             },
             timestamp=datetime.fromisoformat(summary["created_at"]) if summary.get("created_at") else None,
         )
+
+    # Legacy aliases
+    @classmethod
+    def from_loom_message(cls, msg: Dict[str, Any], similarity: float = 0.0) -> "SearchResult":
+        """Backward-compatible alias for conversation messages."""
+        return cls.from_conversation_message(msg, similarity=similarity)
+
+    @classmethod
+    def from_loom_summary(cls, summary: Dict[str, Any], similarity: float = 0.0) -> "SearchResult":
+        """Backward-compatible alias for conversation summaries."""
+        return cls.from_conversation_summary(summary, similarity=similarity)
 
     @classmethod
     def from_memorygate(cls, result: Dict[str, Any]) -> "SearchResult":
@@ -135,7 +146,7 @@ class ThreadInfo:
 @dataclass
 class MemoryStats:
     """Combined memory statistics."""
-    # Loom stats
+    # Conversation stats
     thread_count: int = 0
     message_count: int = 0
     embedded_message_count: int = 0
@@ -148,7 +159,7 @@ class MemoryStats:
     document_count: int = 0
 
     # System stats
-    loom_available: bool = False
+    conversation_available: bool = False
     memorygate_available: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
@@ -158,7 +169,7 @@ class MemoryStats:
                 "messages": self.message_count,
                 "embedded": self.embedded_message_count,
                 "summaries": self.summary_count,
-                "available": self.loom_available,
+                "available": self.conversation_available,
             },
             "knowledge": {
                 "observations": self.observation_count,

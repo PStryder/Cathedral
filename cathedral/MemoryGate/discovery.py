@@ -22,29 +22,20 @@ import logging
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cathedral.Memory import CONVERSATION_BACKEND, ConversationBackend
-
 logger = logging.getLogger(__name__)
 
 
 def _get_conversation_tables() -> Dict[str, str]:
     """
-    Get table names based on the configured conversation backend.
+    Get conversation table names.
 
     Returns dict with keys: messages, embeddings, threads
     """
-    if CONVERSATION_BACKEND == ConversationBackend.LOOM:
-        return {
-            "messages": "loom_messages",
-            "embeddings": "loom_message_embeddings",
-            "threads": "loom_threads",
-        }
-    else:
-        return {
-            "messages": "mg_conversation_messages",
-            "embeddings": "mg_conversation_embeddings",
-            "threads": "mg_conversation_threads",
-        }
+    return {
+        "messages": "mg_conversation_messages",
+        "embeddings": "mg_conversation_embeddings",
+        "threads": "mg_conversation_threads",
+    }
 
 
 @dataclass
@@ -81,8 +72,7 @@ class KnowledgeDiscoveryService:
     - Conversation tables (messages, threads, summaries)
     - MemoryGate tables (observations, patterns, concepts)
 
-    Automatically uses the correct conversation tables based on
-    CONVERSATION_BACKEND configuration (Loom or MemoryGate).
+    Uses MemoryGate conversation tables.
     """
 
     def __init__(self, config: Optional[DiscoveryConfig] = None):
@@ -465,7 +455,7 @@ class KnowledgeDiscoveryService:
         Search conversation messages for similar content in OTHER threads.
 
         Returns list of (message_uid, similarity) tuples.
-        Uses the appropriate tables based on CONVERSATION_BACKEND.
+        Uses MemoryGate conversation tables.
         """
         tables = _get_conversation_tables()
 

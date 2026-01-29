@@ -2,7 +2,7 @@
 Tests for Cathedral Unified Memory.
 
 Tests the UnifiedMemory abstraction layer that combines
-Loom (conversation memory) and MemoryGate (knowledge memory).
+conversation memory (MemoryGate conversation service) and MemoryGate knowledge.
 """
 
 import pytest
@@ -17,7 +17,6 @@ from cathedral.Memory import (
     SearchResult,
     MemoryStats,
 )
-from cathedral.Memory.types import MemoryTier, ThreadInfo
 
 
 class TestMemorySource:
@@ -74,8 +73,8 @@ class TestSearchResult:
         assert data["similarity"] == 0.75
         assert data["ref"] == "message:abc123"
 
-    def test_from_loom_message(self):
-        """Should create SearchResult from Loom message dict."""
+    def test_from_conversation_message(self):
+        """Should create SearchResult from conversation message dict."""
         msg = {
             "message_uid": "uuid-123",
             "role": "user",
@@ -84,7 +83,7 @@ class TestSearchResult:
             "thread_uid": "thread-456",
         }
 
-        result = SearchResult.from_loom_message(msg, similarity=0.8)
+        result = SearchResult.from_conversation_message(msg, similarity=0.8)
 
         assert result.source == MemorySource.CONVERSATION
         assert result.content == "Test message"
@@ -120,7 +119,7 @@ class TestMemoryStats:
 
         assert stats.thread_count == 0
         assert stats.observation_count == 0
-        assert stats.loom_available is False
+        assert stats.conversation_available is False
         assert stats.memorygate_available is False
 
     def test_stats_to_dict(self):
@@ -129,7 +128,7 @@ class TestMemoryStats:
             thread_count=5,
             message_count=100,
             observation_count=50,
-            loom_available=True,
+            conversation_available=True,
             memorygate_available=True,
         )
 
@@ -169,11 +168,11 @@ class TestUnifiedMemoryConversation:
     """Tests for conversation layer operations."""
 
     @pytest.fixture
-    def mock_loom(self):
-        """Create mock Loom instance."""
-        with patch('cathedral.Memory.Loom') as MockLoom:
+    def mock_conversation(self):
+        """Create mock conversation service instance."""
+        with patch('cathedral.Memory._get_conversation_service') as mock_get:
             mock = MagicMock()
-            MockLoom.return_value = mock
+            mock_get.return_value = mock
             yield mock
 
     @pytest.fixture
@@ -184,63 +183,59 @@ class TestUnifiedMemoryConversation:
             MockMG.initialize.return_value = True
             yield MockMG
 
-    def test_create_thread(self, mock_loom, mock_memorygate):
-        """Should delegate thread creation to Loom."""
+    def test_create_thread(self, mock_conversation, mock_memorygate):
+        """Should delegate thread creation to the conversation service."""
         reset_memory()
-        mock_loom.create_new_thread.return_value = "thread-123"
+        mock_conversation.create_thread.return_value = "thread-123"
 
-        with patch('cathedral.Memory.Loom', return_value=mock_loom):
-            with patch('cathedral.Memory.MemoryGate', mock_memorygate):
-                memory = UnifiedMemory()
+        with patch('cathedral.Memory.MemoryGate', mock_memorygate):
+            memory = UnifiedMemory()
 
         import asyncio
         result = asyncio.get_event_loop().run_until_complete(
             memory.create_thread("Test Thread")
         )
 
-        mock_loom.create_new_thread.assert_called_once_with("Test Thread")
+        mock_conversation.create_thread.assert_called_once_with("Test Thread")
         assert result == "thread-123"
 
-    def test_list_threads(self, mock_loom, mock_memorygate):
-        """Should delegate thread listing to Loom."""
+    def test_list_threads(self, mock_conversation, mock_memorygate):
+        """Should delegate thread listing to the conversation service."""
         reset_memory()
-        mock_loom.list_all_threads.return_value = [
+        mock_conversation.list_threads.return_value = [
             {"thread_uid": "t1", "thread_name": "Thread 1"},
             {"thread_uid": "t2", "thread_name": "Thread 2"},
         ]
 
-        with patch('cathedral.Memory.Loom', return_value=mock_loom):
-            with patch('cathedral.Memory.MemoryGate', mock_memorygate):
-                memory = UnifiedMemory()
+        with patch('cathedral.Memory.MemoryGate', mock_memorygate):
+            memory = UnifiedMemory()
 
         threads = memory.list_threads()
 
         assert len(threads) == 2
         assert threads[0]["thread_name"] == "Thread 1"
 
-    def test_switch_thread(self, mock_loom, mock_memorygate):
-        """Should delegate thread switching to Loom."""
+    def test_switch_thread(self, mock_conversation, mock_memorygate):
+        """Should delegate thread switching to the conversation service."""
         reset_memory()
 
-        with patch('cathedral.Memory.Loom', return_value=mock_loom):
-            with patch('cathedral.Memory.MemoryGate', mock_memorygate):
-                memory = UnifiedMemory()
+        with patch('cathedral.Memory.MemoryGate', mock_memorygate):
+            memory = UnifiedMemory()
 
         memory.switch_thread("thread-456")
 
-        mock_loom.switch_to_thread.assert_called_once_with("thread-456")
+        mock_conversation.switch_thread.assert_called_once_with("thread-456")
 
-    def test_clear_thread(self, mock_loom, mock_memorygate):
-        """Should delegate thread clearing to Loom."""
+    def test_clear_thread(self, mock_conversation, mock_memorygate):
+        """Should delegate thread clearing to the conversation service."""
         reset_memory()
 
-        with patch('cathedral.Memory.Loom', return_value=mock_loom):
-            with patch('cathedral.Memory.MemoryGate', mock_memorygate):
-                memory = UnifiedMemory()
+        with patch('cathedral.Memory.MemoryGate', mock_memorygate):
+            memory = UnifiedMemory()
 
         memory.clear_thread("thread-789")
 
-        mock_loom.clear.assert_called_once_with("thread-789")
+        mock_conversation.clear.assert_called_once_with("thread-789")
 
 
 class TestUnifiedMemoryKnowledge:
@@ -251,16 +246,16 @@ class TestUnifiedMemoryKnowledge:
         """Create UnifiedMemory with mocked dependencies."""
         reset_memory()
 
-        mock_loom = MagicMock()
+        mock_conversation = MagicMock()
         mock_mg = MagicMock()
         mock_mg.is_initialized.return_value = True
         mock_mg.initialize.return_value = True
 
-        with patch('cathedral.Memory.Loom', return_value=mock_loom):
+        with patch('cathedral.Memory._get_conversation_service', return_value=mock_conversation):
             with patch('cathedral.Memory.MemoryGate', mock_mg):
                 memory = UnifiedMemory()
                 memory._mg_initialized = True
-                yield memory, mock_loom, mock_mg
+                yield memory, mock_conversation, mock_mg
 
     @pytest.mark.asyncio
     async def test_store_observation(self, memory_with_mocks):
@@ -282,7 +277,7 @@ class TestUnifiedMemoryKnowledge:
         """Should return None when MemoryGate not initialized."""
         reset_memory()
 
-        with patch('cathedral.Memory.Loom'):
+        with patch('cathedral.Memory._get_conversation_service', return_value=MagicMock()):
             with patch('cathedral.Memory.MemoryGate') as mock_mg:
                 mock_mg.is_initialized.return_value = False
                 mock_mg.initialize.return_value = False
@@ -329,8 +324,8 @@ class TestUnifiedSearch:
         """Create UnifiedMemory with configured mocks."""
         reset_memory()
 
-        mock_loom = MagicMock()
-        mock_loom.semantic_search = AsyncMock(return_value=[
+        mock_conversation = MagicMock()
+        mock_conversation.semantic_search = AsyncMock(return_value=[
             {
                 "message_uid": "msg-1",
                 "role": "user",
@@ -338,7 +333,7 @@ class TestUnifiedSearch:
                 "similarity": 0.85,
             }
         ])
-        mock_loom.search_summaries = AsyncMock(return_value=[])
+        mock_conversation.search_summaries = AsyncMock(return_value=[])
 
         mock_mg = MagicMock()
         mock_mg.is_initialized.return_value = True
@@ -353,16 +348,16 @@ class TestUnifiedSearch:
             }
         ]
 
-        with patch('cathedral.Memory.Loom', return_value=mock_loom):
+        with patch('cathedral.Memory._get_conversation_service', return_value=mock_conversation):
             with patch('cathedral.Memory.MemoryGate', mock_mg):
                 memory = UnifiedMemory()
                 memory._mg_initialized = True
-                yield memory, mock_loom, mock_mg
+                yield memory, mock_conversation, mock_mg
 
     @pytest.mark.asyncio
     async def test_unified_search_all_sources(self, memory_with_mocks):
         """Should search all sources and combine results."""
-        memory, mock_loom, mock_mg = memory_with_mocks
+        memory, mock_conversation, mock_mg = memory_with_mocks
 
         results = await memory.unified_search(
             "test query",
@@ -380,7 +375,7 @@ class TestUnifiedSearch:
     @pytest.mark.asyncio
     async def test_unified_search_specific_sources(self, memory_with_mocks):
         """Should only search requested sources."""
-        memory, mock_loom, mock_mg = memory_with_mocks
+        memory, mock_conversation, mock_mg = memory_with_mocks
 
         results = await memory.unified_search(
             "test query",
@@ -388,7 +383,7 @@ class TestUnifiedSearch:
             limit_per_source=3
         )
 
-        # Should not have called Loom semantic_search for conversations
+        # Should not have called conversation semantic_search for conversations
         # since we only requested OBSERVATION
         # (though implementation may still call it)
         assert all(r.source == MemorySource.OBSERVATION for r in results if r.source != MemorySource.CONVERSATION)
@@ -396,7 +391,7 @@ class TestUnifiedSearch:
     @pytest.mark.asyncio
     async def test_unified_search_respects_min_similarity(self, memory_with_mocks):
         """Should filter results below minimum similarity."""
-        memory, mock_loom, mock_mg = memory_with_mocks
+        memory, mock_conversation, mock_mg = memory_with_mocks
 
         # Set high minimum similarity
         results = await memory.unified_search(
@@ -417,8 +412,8 @@ class TestContextComposition:
         """Create UnifiedMemory with configured mocks."""
         reset_memory()
 
-        mock_loom = MagicMock()
-        mock_loom.compose_prompt_context_async = AsyncMock(return_value=[
+        mock_conversation = MagicMock()
+        mock_conversation.compose_context = AsyncMock(return_value=[
             {"role": "user", "content": "Previous message"},
             {"role": "assistant", "content": "Previous response"},
         ])
@@ -437,16 +432,16 @@ class TestContextComposition:
             }
         ]
 
-        with patch('cathedral.Memory.Loom', return_value=mock_loom):
+        with patch('cathedral.Memory._get_conversation_service', return_value=mock_conversation):
             with patch('cathedral.Memory.MemoryGate', mock_mg):
                 memory = UnifiedMemory()
                 memory._mg_initialized = True
-                yield memory, mock_loom, mock_mg
+                yield memory, mock_conversation, mock_mg
 
     @pytest.mark.asyncio
     async def test_compose_context_includes_conversation(self, memory_with_mocks):
         """Should include conversation history in context."""
-        memory, mock_loom, _ = memory_with_mocks
+        memory, mock_conversation, _ = memory_with_mocks
 
         context = await memory.compose_context(
             "New user input",
@@ -454,7 +449,7 @@ class TestContextComposition:
             include_knowledge=False
         )
 
-        mock_loom.compose_prompt_context_async.assert_called_once()
+        mock_conversation.compose_context.assert_called_once()
         assert len(context) >= 2
 
     @pytest.mark.asyncio
@@ -508,15 +503,15 @@ class TestMemoryExtraction:
         """Should extract observations when extract_memory=True."""
         reset_memory()
 
-        mock_loom = MagicMock()
-        mock_loom.append_async = AsyncMock(return_value="msg-123")
+        mock_conversation = MagicMock()
+        mock_conversation.append_async = AsyncMock(return_value="msg-123")
 
         mock_mg = MagicMock()
         mock_mg.is_initialized.return_value = True
         mock_mg.initialize.return_value = True
         mock_mg.store_observation.return_value = {"id": 1}
 
-        with patch('cathedral.Memory.Loom', return_value=mock_loom):
+        with patch('cathedral.Memory._get_conversation_service', return_value=mock_conversation):
             with patch('cathedral.Memory.MemoryGate', mock_mg):
                 memory = UnifiedMemory()
                 memory._mg_initialized = True
@@ -532,8 +527,8 @@ class TestMemoryExtraction:
                 extract_memory=True
             )
 
-            # Should have called Loom append
-            mock_loom.append_async.assert_called_once()
+            # Should have called conversation append
+            mock_conversation.append_async.assert_called_once()
             assert result == "msg-123"
 
 
@@ -544,11 +539,11 @@ class TestKnowledgeFormatting:
         """Should format knowledge results correctly."""
         reset_memory()
 
-        mock_loom = MagicMock()
+        mock_conversation = MagicMock()
         mock_mg = MagicMock()
         mock_mg.is_initialized.return_value = False
 
-        with patch('cathedral.Memory.Loom', return_value=mock_loom):
+        with patch('cathedral.Memory._get_conversation_service', return_value=mock_conversation):
             with patch('cathedral.Memory.MemoryGate', mock_mg):
                 memory = UnifiedMemory()
 
@@ -579,11 +574,11 @@ class TestKnowledgeFormatting:
         """Should return empty string for no results."""
         reset_memory()
 
-        mock_loom = MagicMock()
+        mock_conversation = MagicMock()
         mock_mg = MagicMock()
         mock_mg.is_initialized.return_value = False
 
-        with patch('cathedral.Memory.Loom', return_value=mock_loom):
+        with patch('cathedral.Memory._get_conversation_service', return_value=mock_conversation):
             with patch('cathedral.Memory.MemoryGate', mock_mg):
                 memory = UnifiedMemory()
 

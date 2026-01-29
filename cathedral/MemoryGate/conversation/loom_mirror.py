@@ -1,6 +1,7 @@
 import os
 from llama_cpp import Llama
 
+
 class LoomMirror:
     """
     LoomMirror is the utility LLM interface for memory compression, tagging,
@@ -11,7 +12,7 @@ class LoomMirror:
     def __init__(self, model_path: str, model_name: str = "LoomMirror", n_ctx: int = 2048):
         self.model_path = model_path
         self.model_name = model_name
-        self.n_ctx= n_ctx
+        self.n_ctx = n_ctx
 
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Model path does not exist: {model_path}")
@@ -22,8 +23,8 @@ class LoomMirror:
             n_ctx=self.n_ctx,
             n_gpu_layers=-1,
             verbose=False
-            )
-        
+        )
+
     def run(self, prompt: str, max_tokens: int = 128, temperature: float = 0.7) -> str:
         """
         Executes a prompt against the utility memory LLM and returns the response.
@@ -31,7 +32,7 @@ class LoomMirror:
         """
         print(f"[LoomMirror] Running prompt (truncated): {prompt[:60]}...")
         output = self.llm(prompt, max_tokens=max_tokens, temperature=temperature)
-        return output['choices'][0]['text'].strip()
+        return output["choices"][0]["text"].strip()
 
     def summarize_pair(self, user_text: str, assistant_text: str) -> str:
         """Summarizes a message pair into a short summary."""
@@ -59,7 +60,7 @@ class LoomMirror:
             f"USER: {user_text}\nASSISTANT: {assistant_text}\nTAGS:"
         )
         result = self.run(prompt, max_tokens=64)
-        return [tag.strip() for tag in result.split(',') if tag.strip()]
+        return [tag.strip() for tag in result.split(",") if tag.strip()]
 
     def score_salience(self, text: str) -> float:
         """Stub: Scores the importance of a message pair or fact. Returns float between 0 and 1."""
@@ -100,7 +101,6 @@ class LoomMirror:
             "facts": [...],  # e.g., "Peter owns a BMW K1200RS"
             "tags": [...]    # e.g., "motorcycles", "maintenance", "identity"
         }
-
 
     def __repr__(self):
         return f"<LoomMirror model='{self.model_name}'>"

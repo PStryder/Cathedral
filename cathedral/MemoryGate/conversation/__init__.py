@@ -1,7 +1,7 @@
 """
 MemoryGate Conversation Service
 
-Provides conversation memory management, replacing Loom with a unified
+Provides conversation memory management, replacing the legacy system with a unified
 implementation under MemoryGate. Supports:
 - Thread management (create, switch, list, delete)
 - Message operations (append, recall, clear)
@@ -44,7 +44,7 @@ from .embeddings import (
 # Optional: LoomMirror for local summarization
 try:
     from cathedral.Config import get as get_config
-    from loom.LoomMirror import LoomMirror
+    from .loom_mirror import LoomMirror
     model_path = get_config(
         "LOOMMIRROR_MODEL_PATH",
         "./models/memory/tinyllama-1.1b-chat-v1.0.Q8_0.gguf",
@@ -58,6 +58,25 @@ try:
 except Exception:
     _summarizer = None
     SUMMARIZER_AVAILABLE = False
+
+
+# Knowledge discovery integration (optional, may not be initialized)
+_discovery_enabled = False
+_discovery_queue_func = None
+
+
+def enable_discovery(queue_func):
+    """Enable knowledge discovery by providing the queue function."""
+    global _discovery_enabled, _discovery_queue_func
+    _discovery_enabled = True
+    _discovery_queue_func = queue_func
+
+
+def disable_discovery():
+    """Disable knowledge discovery."""
+    global _discovery_enabled, _discovery_queue_func
+    _discovery_enabled = False
+    _discovery_queue_func = None
 
 
 def estimate_tokens(messages: List[Dict]) -> int:
@@ -82,7 +101,7 @@ class ConversationService:
     """
     Main conversation service providing thread and message management.
 
-    This replaces Loom's functionality with a MemoryGate-integrated
+    This replaces the legacy conversation functionality with a MemoryGate-integrated
     implementation using the same database patterns.
     """
 
@@ -401,12 +420,12 @@ class ConversationService:
 
         # Generate embedding asynchronously
         if generate_embedding and embeddings_configured():
-            asyncio.create_task(self._embed_message(message_uid, content))
+            asyncio.create_task(self._embed_message(message_uid, thread_uid, content))
 
         return message_uid
 
-    async def _embed_message(self, message_uid: str, content: str) -> None:
-        """Generate and store embedding for a message."""
+    async def _embed_message(self, message_uid: str, thread_uid: str, content: str) -> None:
+        """Generate and store embedding for a message, then queue discovery."""
         embedding = await embed_text(content)
         if embedding is None:
             return
@@ -417,6 +436,14 @@ class ConversationService:
                 embedding=embedding
             )
             session.add(msg_embedding)
+
+        # Queue for knowledge discovery (non-blocking)
+        if _discovery_enabled and _discovery_queue_func:
+            try:
+                await _discovery_queue_func(message_uid, thread_uid, embedding)
+            except Exception:
+                # Don't let discovery failures affect message flow
+                pass
 
     def clear(self, thread_uid: str = None) -> int:
         """
@@ -841,6 +868,8 @@ __all__ = [
     "ConversationService",
     "get_conversation_service",
     "reset_service",
+    "enable_discovery",
+    "disable_discovery",
     "ConversationThread",
     "ConversationMessage",
     "ConversationEmbedding",

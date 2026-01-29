@@ -108,7 +108,7 @@ async def handle_pre_command(
             yield format_search_results(results)
         return _gen()
 
-    # === Unified Search (across Loom + MemoryGate) ===
+    # === Unified Search (conversation + MemoryGate) ===
 
     if lowered.startswith("/usearch "):
         async def _gen() -> AsyncGenerator[str, None]:
@@ -158,9 +158,9 @@ async def handle_pre_command(
         async def _gen() -> AsyncGenerator[str, None]:
             stats = await ctx.memory.get_stats()
             yield "Memory Statistics:\n\n"
-            yield "Conversation (Loom):\n"
+            yield "Conversation:\n"
             yield f"  Threads: {stats.thread_count}\n"
-            yield f"  Available: {'Yes' if stats.loom_available else 'No'}\n\n"
+            yield f"  Available: {'Yes' if stats.conversation_available else 'No'}\n\n"
             yield "Knowledge (MemoryGate):\n"
             yield f"  Observations: {stats.observation_count}\n"
             yield f"  Patterns: {stats.pattern_count}\n"
@@ -304,7 +304,7 @@ async def handle_pre_command(
                 yield f"Discovery service not available: {e}"
         return _gen()
 
-    # === Loom Semantic Search ===
+    # === Conversation Semantic Search ===
 
     if lowered.startswith("/loomsearch "):
         async def _gen() -> AsyncGenerator[str, None]:
