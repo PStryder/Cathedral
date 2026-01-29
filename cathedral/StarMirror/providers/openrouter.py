@@ -24,7 +24,7 @@ from cathedral.StarMirror.MediaGate import (
     load_audio,
 )
 
-env_path = Path(__file__).resolve().parents[4] / ".env"
+env_path = Path(__file__).resolve().parents[3] / ".env"
 load_dotenv(dotenv_path=env_path)
 
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -145,13 +145,15 @@ def transmit(
             content_str = _format_content_for_log(msg.get("content", ""))
             print(f"  - {msg.get('role', 'unknown')}: {content_str}")
 
+    response = None
     try:
         response = requests.post(API_URL, headers=headers, json=payload, timeout=120)
         response.raise_for_status()
     except requests.RequestException as e:
         print("[StarMirror] API call failed.")
-        print("Status code:", getattr(response, 'status_code', 'no response'))
-        print("Response text:", getattr(response, 'text', 'no text')[:500])
+        if response is not None:
+            print("Status code:", getattr(response, "status_code", "no response"))
+            print("Response text:", getattr(response, "text", "no text")[:500])
         raise RuntimeError(f"Failed to transmit to LLM: {e}")
 
     try:

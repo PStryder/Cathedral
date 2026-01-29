@@ -170,6 +170,8 @@ def check_dangerous_constructs(command: str) -> List[str]:
 
     # Check for shell operators that could be dangerous
     dangerous_patterns = [
+        (r"\bsudo\b", "Using sudo (elevated privileges)"),
+        (r"\brm\b\s+-[^\n]*(r|f)", "Potentially destructive rm command"),
         (r"\|.*rm\b", "Piping to rm command"),
         (r">\s*/etc/", "Writing to /etc"),
         (r">\s*/var/", "Writing to /var"),
@@ -231,11 +233,12 @@ def estimate_command_risk(command: str, config: CommandConfig) -> Dict[str, Any]
     # Check if blocked
     is_valid, error = validate_command(command, config)
     if not is_valid:
+        warnings = check_dangerous_constructs(command)
         return {
             "risk_level": "blocked",
             "is_blocked": True,
             "block_reason": error,
-            "warnings": []
+            "warnings": warnings
         }
 
     # Get warnings

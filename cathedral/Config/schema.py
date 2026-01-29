@@ -61,10 +61,10 @@ CONFIG_SCHEMA: List[ConfigField] = [
     # === API Keys ===
     ConfigField(
         key="OPENROUTER_API_KEY",
-        description="API key for OpenRouter LLM access (required for chat)",
+        description="API key for OpenRouter LLM access (required when LLM_BACKEND=openrouter)",
         config_type=ConfigType.SECRET,
         category=ConfigCategory.API_KEYS,
-        required=True,
+        required=False,
         validation=r"^sk-or-.*",
     ),
     ConfigField(

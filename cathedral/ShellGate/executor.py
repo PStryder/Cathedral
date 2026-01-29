@@ -122,14 +122,15 @@ def execute_sync(
         if len(stderr) > config.max_output_bytes:
             stderr = stderr[:config.max_output_bytes] + "\n... (output truncated)"
 
+        success = result.returncode == 0
         return CommandResult(
-            success=result.returncode == 0,
+            success=success,
             command=command,
             exit_code=result.returncode,
             stdout=stdout,
             stderr=stderr,
             duration_seconds=duration,
-            status=CommandStatus.COMPLETED,
+            status=CommandStatus.COMPLETED if success else CommandStatus.FAILED,
             execution_id=execution_id
         )
 
@@ -265,14 +266,15 @@ async def execute_async(
         if len(stderr) > config.max_output_bytes:
             stderr = stderr[:config.max_output_bytes] + "\n... (output truncated)"
 
+        success = process.returncode == 0
         return CommandResult(
-            success=process.returncode == 0,
+            success=success,
             command=command,
             exit_code=process.returncode or 0,
             stdout=stdout,
             stderr=stderr,
             duration_seconds=duration,
-            status=CommandStatus.COMPLETED,
+            status=CommandStatus.COMPLETED if success else CommandStatus.FAILED,
             execution_id=execution_id
         )
 

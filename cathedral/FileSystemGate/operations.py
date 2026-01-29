@@ -99,7 +99,7 @@ def list_directory(
             operation="list",
             path=resolved,
             message=f"Listed {len(files)} items",
-            data=[f.to_dict() for f in files]
+            data=files
         )
 
     except OSError as e:
@@ -460,7 +460,7 @@ def get_file_info(
             success=True,
             operation="info",
             path=resolved,
-            data=file_info.to_dict()
+            data=file_info
         )
 
     except OSError as e:

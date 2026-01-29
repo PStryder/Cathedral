@@ -47,14 +47,14 @@ from .security import (
     PathSecurityError,
 )
 from .operations import (
-    list_directory,
-    read_file,
-    write_file,
-    make_directory,
-    delete_path,
-    get_file_info,
-    copy_file,
-    move_file,
+    list_directory as op_list_directory,
+    read_file as op_read_file,
+    write_file as op_write_file,
+    make_directory as op_make_directory,
+    delete_path as op_delete_path,
+    get_file_info as op_get_file_info,
+    copy_file as op_copy_file,
+    move_file as op_move_file,
 )
 from .backup import BackupManager
 
@@ -331,7 +331,7 @@ class FileSystemGate:
                 error=f"Folder not found: {folder_id}"
             )
 
-        return list_directory(folder, relative_path, show_hidden)
+        return op_list_directory(folder, relative_path, show_hidden)
 
     @classmethod
     def read_file(
@@ -362,7 +362,7 @@ class FileSystemGate:
                 error=f"Folder not found: {folder_id}"
             )
 
-        return read_file(folder, relative_path, encoding, binary)
+        return op_read_file(folder, relative_path, encoding, binary)
 
     @classmethod
     def write_file(
@@ -406,7 +406,7 @@ class FileSystemGate:
             backup_record = backup_manager.create_backup(folder, target_path, "modify")
 
         # Perform write
-        result, _ = write_file(folder, relative_path, content, encoding, create_dirs)
+        result, _ = op_write_file(folder, relative_path, content, encoding, create_dirs)
 
         # Add backup ID to result if backup was created
         if backup_record:
@@ -442,7 +442,7 @@ class FileSystemGate:
                 error=f"Folder not found: {folder_id}"
             )
 
-        return make_directory(folder, relative_path, parents)
+        return op_make_directory(folder, relative_path, parents)
 
     @classmethod
     def delete(
@@ -482,7 +482,7 @@ class FileSystemGate:
             backup_record = backup_manager.create_backup(folder, target_path, "delete")
 
         # Perform delete
-        result, _ = delete_path(folder, relative_path, recursive)
+        result, _ = op_delete_path(folder, relative_path, recursive)
 
         # Add backup ID to result
         if backup_record:
@@ -512,7 +512,7 @@ class FileSystemGate:
                 error=f"Folder not found: {folder_id}"
             )
 
-        return get_file_info(folder, relative_path)
+        return op_get_file_info(folder, relative_path)
 
     @classmethod
     def copy(
@@ -543,7 +543,7 @@ class FileSystemGate:
                 error=f"Folder not found: {folder_id}"
             )
 
-        return copy_file(folder, source_path, dest_path, overwrite)
+        return op_copy_file(folder, source_path, dest_path, overwrite)
 
     @classmethod
     def move(
@@ -574,7 +574,7 @@ class FileSystemGate:
                 error=f"Folder not found: {folder_id}"
             )
 
-        return move_file(folder, source_path, dest_path, overwrite)
+        return op_move_file(folder, source_path, dest_path, overwrite)
 
     # ==================== Backup Operations ====================
 

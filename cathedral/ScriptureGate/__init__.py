@@ -44,7 +44,6 @@ from cathedral.ScriptureGate.indexer import (
 
 # Database - use shared database utilities (backend-agnostic)
 from cathedral.shared.db import (
-    init_db,
     get_session,
     get_async_session,
     is_initialized as db_initialized,
@@ -61,10 +60,15 @@ def _ensure_tables():
         return
 
     if not db_initialized():
-        init_db()
+        raise RuntimeError("Database not initialized. Call init_db(...) before using ScriptureGate.")
 
     Base.metadata.create_all(bind=get_engine())
     _tables_created = True
+
+
+def init_scripture_db() -> None:
+    """Initialize scripture tables (explicit)."""
+    _ensure_tables()
 
 
 # ==================== Store Operations ====================
@@ -313,7 +317,7 @@ async def search(
     if query_embedding is None:
         return []
 
-    async with await get_async_session() as session:
+    async with get_async_session() as session:
         # Build query with filters
         filters = ["is_deleted = false", "is_indexed = true"]
         params = {"query_embedding": str(query_embedding), "limit": limit}

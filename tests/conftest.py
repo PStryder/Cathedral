@@ -17,6 +17,23 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 
+@pytest.fixture(scope="session", autouse=True)
+def init_test_db(tmp_path_factory):
+    """Initialize a SQLite DB for tests."""
+    db_path = tmp_path_factory.mktemp("db") / "cathedral_test.sqlite"
+    database_url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+
+    from cathedral.shared.db_service import init_db
+    from cathedral.MemoryGate.conversation import db as conversation_db
+    from cathedral.ScriptureGate import init_scripture_db
+
+    init_db(database_url)
+    conversation_db.init_conversation_db()
+    init_scripture_db()
+
+    yield
+
+
 @pytest.fixture
 def temp_dir() -> Generator[Path, None, None]:
     """Create a temporary directory for tests."""

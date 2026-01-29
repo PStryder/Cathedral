@@ -107,9 +107,17 @@ class ConversationService:
 
     def __init__(self):
         """Initialize the conversation service."""
-        init_conversation_db()
         self.active_thread_uid: Optional[str] = None
-        self._ensure_default_thread()
+
+    def _resolve_thread_uid(self, thread_uid: Optional[str]) -> str:
+        """Resolve thread UID, ensuring a default thread exists."""
+        if thread_uid:
+            return thread_uid
+        if not self.active_thread_uid:
+            self._ensure_default_thread()
+        if not self.active_thread_uid:
+            raise ValueError("No thread UID provided or active")
+        return self.active_thread_uid
 
     def _ensure_default_thread(self):
         """Ensure a default thread exists and set it as active."""
@@ -302,10 +310,7 @@ class ConversationService:
         Returns:
             List of message dicts
         """
-        if not thread_uid:
-            thread_uid = self.active_thread_uid
-        if not thread_uid:
-            raise ValueError("No thread UID provided or active")
+        thread_uid = self._resolve_thread_uid(thread_uid)
 
         with get_session() as session:
             messages = session.execute(
@@ -325,10 +330,7 @@ class ConversationService:
         Returns:
             List of message dicts
         """
-        if not thread_uid:
-            thread_uid = self.active_thread_uid
-        if not thread_uid:
-            raise ValueError("No thread UID provided or active")
+        thread_uid = self._resolve_thread_uid(thread_uid)
 
         async with get_async_session() as session:
             result = await session.execute(
@@ -351,10 +353,7 @@ class ConversationService:
         Returns:
             Message UID
         """
-        if not thread_uid:
-            thread_uid = self.active_thread_uid
-        if not thread_uid:
-            raise ValueError("No thread UID provided or active")
+        thread_uid = self._resolve_thread_uid(thread_uid)
 
         message_uid = str(uuid.uuid4())
 
@@ -395,10 +394,7 @@ class ConversationService:
         Returns:
             Message UID
         """
-        if not thread_uid:
-            thread_uid = self.active_thread_uid
-        if not thread_uid:
-            raise ValueError("No thread UID provided or active")
+        thread_uid = self._resolve_thread_uid(thread_uid)
 
         message_uid = str(uuid.uuid4())
 
@@ -455,10 +451,7 @@ class ConversationService:
         Returns:
             Number of messages deleted
         """
-        if not thread_uid:
-            thread_uid = self.active_thread_uid
-        if not thread_uid:
-            raise ValueError("No thread UID provided or active")
+        thread_uid = self._resolve_thread_uid(thread_uid)
 
         with get_session() as session:
             result = session.execute(
@@ -656,8 +649,7 @@ class ConversationService:
         thread_uid: str = None
     ) -> List[Dict]:
         """Get history with early messages summarized (sync)."""
-        if not thread_uid:
-            thread_uid = self.active_thread_uid
+        thread_uid = self._resolve_thread_uid(thread_uid)
 
         history = self.recall(thread_uid)
 
@@ -681,8 +673,7 @@ class ConversationService:
         thread_uid: str = None
     ) -> List[Dict]:
         """Get history with early messages summarized (async)."""
-        if not thread_uid:
-            thread_uid = self.active_thread_uid
+        thread_uid = self._resolve_thread_uid(thread_uid)
 
         history = await self.recall_async(thread_uid)
 

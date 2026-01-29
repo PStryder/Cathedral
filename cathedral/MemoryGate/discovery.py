@@ -186,7 +186,7 @@ class KnowledgeDiscoveryService:
         message_ref = f"message:{message_uid}"
         relationships = []
 
-        async with await get_async_session() as session:
+        async with get_async_session() as session:
             # 1. Find similar observations
             obs_results = await self._search_memorygate_embeddings(
                 session, embedding, "observation", self.config.top_k
@@ -273,7 +273,7 @@ class KnowledgeDiscoveryService:
         from cathedral.shared.db import get_async_session
         from cathedral import MemoryGate
 
-        async with await get_async_session() as session:
+        async with get_async_session() as session:
             # Get thread embedding
             embedding = await self._get_thread_embedding(session, thread_uid)
             if not embedding:
@@ -338,7 +338,7 @@ class KnowledgeDiscoveryService:
 
         tables = _get_conversation_tables()
 
-        async with await get_async_session() as session:
+        async with get_async_session() as session:
             # Get all message embeddings for thread, ordered by timestamp
             query = text(f"""
                 SELECT me.embedding
@@ -495,7 +495,7 @@ class KnowledgeDiscoveryService:
 
         from cathedral.shared.db import get_async_session
 
-        async with await get_async_session() as session:
+        async with get_async_session() as session:
             # Get embedding if not provided
             if embedding is None:
                 embedding = await self._get_embedding_for_ref(session, ref_type, ref_id)

@@ -69,7 +69,7 @@ async def stream(
         *cmd,
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
     )
 
     assert process.stdin is not None
@@ -84,14 +84,9 @@ async def stream(
         chunk = line.decode("utf-8", errors="replace")
         yield chunk
 
-    stderr = b""
-    if process.stderr is not None:
-        stderr = await process.stderr.read()
-
     return_code = await process.wait()
     if return_code != 0:
-        err_text = stderr.decode("utf-8", errors="replace").strip()
-        raise RuntimeError(f"Claude CLI exited with {return_code}: {err_text}")
+        raise RuntimeError(f"Claude CLI exited with {return_code}.")
 
 
 def transmit(

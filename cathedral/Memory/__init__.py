@@ -20,6 +20,8 @@ from .types import (
     MemoryStats,
 )
 
+MemoryGate = None
+
 
 def _get_conversation_service():
     """Get the MemoryGate conversation service."""
@@ -29,7 +31,10 @@ def _get_conversation_service():
 
 def _get_memorygate():
     """Get the MemoryGate module."""
-    from cathedral import MemoryGate
+    global MemoryGate
+    if MemoryGate is None:
+        from cathedral import MemoryGate as _MemoryGate
+        MemoryGate = _MemoryGate
     return MemoryGate
 
 

@@ -8,7 +8,10 @@ from cathedral import (
     ShellGate,
     BrowserGate,
     ScriptureGate,
+    Config,
 )
+from cathedral.shared import db_service
+from cathedral.MemoryGate.conversation import db as conversation_db
 from cathedral.MemoryGate.discovery import (
     start_discovery,
     stop_discovery,
@@ -19,6 +22,14 @@ from cathedral.runtime import loom
 
 async def startup(emit_event):
     """Initialize subsystems on server startup."""
+    database_url = Config.get("DATABASE_URL")
+    if database_url:
+        db_service.init_db(database_url)
+        conversation_db.init_conversation_db()
+        ScriptureGate.init_scripture_db()
+    else:
+        print("[Cathedral] DATABASE_URL not set - conversation/scripture DB disabled")
+
     MemoryGate.initialize()
     PersonalityGate.initialize()
     SecurityManager.initialize()
