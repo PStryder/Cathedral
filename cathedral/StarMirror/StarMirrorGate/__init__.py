@@ -2,62 +2,29 @@
 """
 StarMirrorGate - LLM API communication layer with multi-modal support.
 
-Supports text, images (file/URL/base64), and audio through OpenRouter.
+Delegates to the StarMirror router for provider selection.
 """
 
-import os
-import json
-import requests
-import httpx
-from dotenv import load_dotenv
-from pathlib import Path
-from typing import AsyncGenerator, List, Optional, Union, Dict, Any
+from typing import AsyncGenerator, Dict, List, Optional
 
-env_path = Path(__file__).resolve().parents[3] / ".env"
-load_dotenv(dotenv_path=env_path)
-
-# Import MediaGate for multi-modal support
+from .. import router as _router
 from cathedral.StarMirror.MediaGate import (
     ContentBuilder,
     MediaItem,
     ImageDetail,
     build_multimodal_message,
-    is_multimodal_content,
-    extract_text_from_content,
-    supports_vision,
     load_image,
     load_audio,
+    supports_vision,
 )
 
-API_URL = "https://openrouter.ai/api/v1/chat/completions"
-API_KEY = os.getenv("OPENROUTER_API_KEY")
 DEFAULT_MODEL = "openai/gpt-4o-2024-11-20"
 DEFAULT_VISION_MODEL = "openai/gpt-4o-2024-11-20"
 
-if not API_KEY:
-    raise RuntimeError("OPENROUTER_API_KEY is not set. Ensure your .env file exists and contains the key.")
 
-
-def _format_content_for_log(content: Any, max_len: int = 100) -> str:
-    """Format message content for logging (handles multi-modal)."""
-    if isinstance(content, str):
-        return content[:max_len] + "..." if len(content) > max_len else content
-    if isinstance(content, list):
-        parts = []
-        for p in content:
-            if p.get("type") == "text":
-                text = p.get("text", "")[:50]
-                parts.append(f"text:{text}...")
-            elif p.get("type") == "image_url":
-                url = p.get("image_url", {}).get("url", "")
-                if url.startswith("data:"):
-                    parts.append("[image:base64]")
-                else:
-                    parts.append(f"[image:{url[:30]}...]")
-            elif p.get("type") == "input_audio":
-                parts.append("[audio]")
-        return " + ".join(parts)
-    return str(content)[:max_len]
+def _validate_messages(messages: List[Dict]) -> None:
+    if not isinstance(messages, list) or len(messages) == 0:
+        raise ValueError("Cannot transmit: message list is empty or invalid.")
 
 
 async def transmit_stream(
@@ -67,43 +34,18 @@ async def transmit_stream(
     max_tokens: Optional[int] = None
 ) -> AsyncGenerator[str, None]:
     """
-    Stream tokens from OpenRouter API using SSE.
+    Stream tokens from the configured LLM backend.
     Supports both text-only and multi-modal messages.
     """
-    if not isinstance(messages, list) or len(messages) == 0:
-        raise ValueError("Cannot transmit: message list is empty or invalid.")
+    _validate_messages(messages)
 
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    payload = {
-        "model": model,
-        "messages": messages,
-        "temperature": temperature,
-        "stream": True,
-    }
-
-    if max_tokens:
-        payload["max_tokens"] = max_tokens
-
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        async with client.stream("POST", API_URL, headers=headers, json=payload) as response:
-            response.raise_for_status()
-            async for line in response.aiter_lines():
-                if line.startswith("data: "):
-                    data_str = line[6:]
-                    if data_str.strip() == "[DONE]":
-                        break
-                    try:
-                        data = json.loads(data_str)
-                        if choices := data.get("choices"):
-                            if delta := choices[0].get("delta"):
-                                if content := delta.get("content"):
-                                    yield content
-                    except json.JSONDecodeError:
-                        continue
+    async for token in _router.stream(
+        messages,
+        temperature=temperature,
+        model=model,
+        max_tokens=max_tokens,
+    ):
+        yield token
 
 
 def transmit(
@@ -114,47 +56,17 @@ def transmit(
     verbose: bool = True
 ) -> str:
     """
-    Send messages to OpenRouter API and return response.
+    Send messages to the configured LLM backend and return response.
     Supports both text-only and multi-modal messages.
     """
-    if not isinstance(messages, list) or len(messages) == 0:
-        raise ValueError("Cannot transmit: message list is empty or invalid.")
-
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    payload = {
-        "model": model,
-        "messages": messages,
-        "temperature": temperature,
-    }
-
-    if max_tokens:
-        payload["max_tokens"] = max_tokens
-
-    if verbose:
-        print("[StarMirror] Transmit payload:")
-        for msg in messages:
-            content_str = _format_content_for_log(msg.get("content", ""))
-            print(f"  - {msg.get('role', 'unknown')}: {content_str}")
-
-    try:
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=120)
-        response.raise_for_status()
-    except requests.RequestException as e:
-        print("[StarMirror] API call failed.")
-        print("Status code:", getattr(response, 'status_code', 'no response'))
-        print("Response text:", getattr(response, 'text', 'no text')[:500])
-        raise RuntimeError(f"Failed to transmit to LLM: {e}")
-
-    try:
-        return response.json()["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as e:
-        print("[StarMirror] Malformed response:")
-        print(response.json())
-        raise RuntimeError(f"Malformed response structure: {e}")
+    _validate_messages(messages)
+    return _router.transmit(
+        messages,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        verbose=verbose,
+    )
 
 
 async def transmit_async(
@@ -166,28 +78,13 @@ async def transmit_async(
     """
     Async non-streaming transmit. Returns complete response.
     """
-    if not isinstance(messages, list) or len(messages) == 0:
-        raise ValueError("Cannot transmit: message list is empty or invalid.")
-
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    payload = {
-        "model": model,
-        "messages": messages,
-        "temperature": temperature,
-    }
-
-    if max_tokens:
-        payload["max_tokens"] = max_tokens
-
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        response = await client.post(API_URL, headers=headers, json=payload)
-        response.raise_for_status()
-        data = response.json()
-        return data["choices"][0]["message"]["content"]
+    _validate_messages(messages)
+    return await _router.transmit_async(
+        messages,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
 
 
 # ==================== Multi-Modal Convenience Functions ====================
@@ -203,18 +100,8 @@ async def transmit_vision_stream(
 ) -> AsyncGenerator[str, None]:
     """
     Stream a vision query with images.
-
-    Args:
-        prompt: Text prompt/question about the images
-        images: List of image paths, URLs, or base64 strings
-        model: Vision-capable model
-        image_detail: Detail level (low/high/auto)
-        system_prompt: Optional system message
-
-    Yields:
-        Response tokens
     """
-    messages = []
+    messages: List[Dict] = []
 
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
@@ -241,18 +128,8 @@ def transmit_vision(
 ) -> str:
     """
     Send a vision query with images (sync).
-
-    Args:
-        prompt: Text prompt/question about the images
-        images: List of image paths, URLs, or base64 strings
-        model: Vision-capable model
-        image_detail: Detail level (low/high/auto)
-        system_prompt: Optional system message
-
-    Returns:
-        Model response
     """
-    messages = []
+    messages: List[Dict] = []
 
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
@@ -274,14 +151,6 @@ async def describe_image(
 ) -> str:
     """
     Get a description of an image.
-
-    Args:
-        image: Image path, URL, or base64
-        prompt: Description prompt
-        model: Vision model
-
-    Returns:
-        Image description
     """
     return await transmit_async(
         messages=[build_multimodal_message(text=prompt, images=[image])],
@@ -296,14 +165,6 @@ async def compare_images(
 ) -> str:
     """
     Compare multiple images.
-
-    Args:
-        images: List of image paths/URLs
-        prompt: Comparison prompt
-        model: Vision model
-
-    Returns:
-        Comparison description
     """
     return await transmit_async(
         messages=[build_multimodal_message(text=prompt, images=images)],
@@ -314,55 +175,19 @@ async def compare_images(
 # ==================== Audio Support ====================
 
 
-WHISPER_API_URL = "https://api.openai.com/v1/audio/transcriptions"
-
-
 async def transcribe_audio(
     audio_path: str,
     language: Optional[str] = None,
     prompt: Optional[str] = None
 ) -> str:
     """
-    Transcribe audio using OpenAI Whisper API.
-
-    Args:
-        audio_path: Path to audio file
-        language: Optional language code (e.g., "en")
-        prompt: Optional prompt to guide transcription
-
-    Returns:
-        Transcribed text
+    Transcribe audio using OpenAI Whisper API (via provider support).
     """
-    openai_key = os.getenv("OPENAI_API_KEY")
-    if not openai_key:
-        raise RuntimeError("OPENAI_API_KEY required for audio transcription")
-
-    path = Path(audio_path)
-    if not path.exists():
-        raise FileNotFoundError(f"Audio file not found: {audio_path}")
-
-    headers = {
-        "Authorization": f"Bearer {openai_key}",
-    }
-
-    async with httpx.AsyncClient(timeout=300.0) as client:
-        with open(path, "rb") as f:
-            files = {"file": (path.name, f, "audio/mpeg")}
-            data = {"model": "whisper-1"}
-
-            if language:
-                data["language"] = language
-            if prompt:
-                data["prompt"] = prompt
-
-            response = await client.post(
-                WHISPER_API_URL,
-                headers=headers,
-                files=files,
-                data=data
-            )
-            response.raise_for_status()
-            return response.json().get("text", "")
+    return await _router.transcribe_audio(
+        audio_path=audio_path,
+        language=language,
+        prompt=prompt,
+    )
 
 
 async def transmit_with_audio(
@@ -374,28 +199,14 @@ async def transmit_with_audio(
 ) -> str:
     """
     Process audio input (transcribe and include in prompt).
-
-    Args:
-        prompt: Text prompt
-        audio_path: Path to audio file
-        model: Model to use
-        temperature: Sampling temperature
-        transcribe: If True, transcribe audio first
-
-    Returns:
-        Model response
     """
-    if transcribe:
-        transcription = await transcribe_audio(audio_path)
-        combined_prompt = f"{prompt}\n\n[Audio transcription]:\n{transcription}"
-        messages = [{"role": "user", "content": combined_prompt}]
-    else:
-        # Some models support direct audio input
-        audio_item = load_audio(audio_path)
-        builder = ContentBuilder().text(prompt).audio_item(audio_item)
-        messages = [builder.build_message()]
-
-    return await transmit_async(messages, model=model, temperature=temperature)
+    return await _router.transmit_with_audio(
+        prompt=prompt,
+        audio_path=audio_path,
+        model=model,
+        temperature=temperature,
+        transcribe=transcribe,
+    )
 
 
 # ==================== Exports ====================
