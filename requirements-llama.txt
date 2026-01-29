@@ -1,0 +1,4 @@
+# Optional: local LoomMirror / llama.cpp backend
+# If you prefer pip wheels instead of the local checkout, use:
+#   pip install llama-cpp-python
+-e ./llama-cpp-python

@@ -22,7 +22,29 @@ import logging
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cathedral.Memory import CONVERSATION_BACKEND, ConversationBackend
+
 logger = logging.getLogger(__name__)
+
+
+def _get_conversation_tables() -> Dict[str, str]:
+    """
+    Get table names based on the configured conversation backend.
+
+    Returns dict with keys: messages, embeddings, threads
+    """
+    if CONVERSATION_BACKEND == ConversationBackend.LOOM:
+        return {
+            "messages": "loom_messages",
+            "embeddings": "loom_message_embeddings",
+            "threads": "loom_threads",
+        }
+    else:
+        return {
+            "messages": "mg_conversation_messages",
+            "embeddings": "mg_conversation_embeddings",
+            "threads": "mg_conversation_threads",
+        }
 
 
 @dataclass
@@ -56,8 +78,11 @@ class KnowledgeDiscoveryService:
     Discovers relationships through embedding similarity.
 
     Uses pgvector cosine distance to find related entities across:
-    - Loom tables (messages, threads, summaries)
+    - Conversation tables (messages, threads, summaries)
     - MemoryGate tables (observations, patterns, concepts)
+
+    Automatically uses the correct conversation tables based on
+    CONVERSATION_BACKEND configuration (Loom or MemoryGate).
     """
 
     def __init__(self, config: Optional[DiscoveryConfig] = None):
@@ -165,7 +190,7 @@ class KnowledgeDiscoveryService:
         if not self.config.enabled:
             return
 
-        from loom.db import get_async_session
+        from cathedral.shared.db import get_async_session
         from cathedral import MemoryGate
 
         message_ref = f"message:{message_uid}"
@@ -215,7 +240,7 @@ class KnowledgeDiscoveryService:
                     ))
 
             # 4. Find similar messages in OTHER threads
-            message_results = await self._search_loom_messages(
+            message_results = await self._search_conversation_messages(
                 session, embedding, thread_uid, self.config.top_k
             )
             for other_uid, similarity in message_results:
@@ -255,7 +280,7 @@ class KnowledgeDiscoveryService:
         if not self.config.enabled:
             return
 
-        from loom.db import get_async_session
+        from cathedral.shared.db import get_async_session
         from cathedral import MemoryGate
 
         async with await get_async_session() as session:
@@ -283,7 +308,7 @@ class KnowledgeDiscoveryService:
                     ))
 
             # 2. Find similar messages in OTHER threads
-            message_results = await self._search_loom_messages(
+            message_results = await self._search_conversation_messages(
                 session, embedding, thread_uid, self.config.top_k
             )
             for other_uid, similarity in message_results:
@@ -318,15 +343,17 @@ class KnowledgeDiscoveryService:
 
         Uses weighted average of message embeddings (recent messages weighted higher).
         """
-        from loom.db import get_async_session
+        from cathedral.shared.db import get_async_session
         from cathedral import MemoryGate
+
+        tables = _get_conversation_tables()
 
         async with await get_async_session() as session:
             # Get all message embeddings for thread, ordered by timestamp
-            query = text("""
+            query = text(f"""
                 SELECT me.embedding
-                FROM loom_message_embeddings me
-                JOIN loom_messages m ON m.message_uid = me.message_uid
+                FROM {tables['embeddings']} me
+                JOIN {tables['messages']} m ON m.message_uid = me.message_uid
                 WHERE m.thread_uid = :thread_uid
                 ORDER BY m.timestamp ASC
             """)
@@ -427,7 +454,7 @@ class KnowledgeDiscoveryService:
 
         return [(int(row[0]), float(row[1])) for row in result.fetchall()]
 
-    async def _search_loom_messages(
+    async def _search_conversation_messages(
         self,
         session: AsyncSession,
         embedding: List[float],
@@ -435,14 +462,17 @@ class KnowledgeDiscoveryService:
         limit: int
     ) -> List[Tuple[str, float]]:
         """
-        Search Loom messages for similar content in OTHER threads.
+        Search conversation messages for similar content in OTHER threads.
 
         Returns list of (message_uid, similarity) tuples.
+        Uses the appropriate tables based on CONVERSATION_BACKEND.
         """
-        query = text("""
+        tables = _get_conversation_tables()
+
+        query = text(f"""
             SELECT me.message_uid, 1 - (me.embedding <=> :embedding::vector) as similarity
-            FROM loom_message_embeddings me
-            JOIN loom_messages m ON m.message_uid = me.message_uid
+            FROM {tables['embeddings']} me
+            JOIN {tables['messages']} m ON m.message_uid = me.message_uid
             WHERE m.thread_uid != :exclude_thread_uid
               AND me.embedding IS NOT NULL
             ORDER BY me.embedding <=> :embedding::vector
@@ -473,7 +503,7 @@ class KnowledgeDiscoveryService:
         """
         ref_type, ref_id = ref.split(":", 1)
 
-        from loom.db import get_async_session
+        from cathedral.shared.db import get_async_session
 
         async with await get_async_session() as session:
             # Get embedding if not provided
@@ -524,7 +554,7 @@ class KnowledgeDiscoveryService:
 
                 # Search other messages (cross-thread only)
                 if thread_uid:
-                    for msg_uid, sim in await self._search_loom_messages(
+                    for msg_uid, sim in await self._search_conversation_messages(
                         session, embedding, thread_uid, self.config.top_k
                     ):
                         if sim >= self.config.min_similarity:
@@ -547,7 +577,7 @@ class KnowledgeDiscoveryService:
                         ))
 
                 # Search messages in other threads
-                for msg_uid, sim in await self._search_loom_messages(
+                for msg_uid, sim in await self._search_conversation_messages(
                     session, embedding, ref_id, self.config.top_k
                 ):
                     if sim >= self.config.min_similarity:
@@ -559,7 +589,7 @@ class KnowledgeDiscoveryService:
 
             elif ref_type in ("observation", "pattern", "concept"):
                 # Search messages
-                for msg_uid, sim in await self._search_all_loom_messages(
+                for msg_uid, sim in await self._search_all_conversation_messages(
                     session, embedding, self.config.top_k
                 ):
                     if sim >= self.config.min_similarity:
@@ -579,9 +609,11 @@ class KnowledgeDiscoveryService:
         ref_id: str
     ) -> Optional[List[float]]:
         """Get embedding for a reference."""
+        tables = _get_conversation_tables()
+
         if ref_type == "message":
-            query = text("""
-                SELECT embedding FROM loom_message_embeddings
+            query = text(f"""
+                SELECT embedding FROM {tables['embeddings']}
                 WHERE message_uid = :ref_id
             """)
         elif ref_type == "thread":
@@ -612,21 +644,24 @@ class KnowledgeDiscoveryService:
         message_uid: str
     ) -> Optional[str]:
         """Get thread_uid for a message."""
-        query = text("SELECT thread_uid FROM loom_messages WHERE message_uid = :uid")
+        tables = _get_conversation_tables()
+        query = text(f"SELECT thread_uid FROM {tables['messages']} WHERE message_uid = :uid")
         result = await session.execute(query, {"uid": message_uid})
         row = result.fetchone()
         return row[0] if row else None
 
-    async def _search_all_loom_messages(
+    async def _search_all_conversation_messages(
         self,
         session: AsyncSession,
         embedding: List[float],
         limit: int
     ) -> List[Tuple[str, float]]:
-        """Search all Loom messages (no exclusion)."""
-        query = text("""
+        """Search all conversation messages (no exclusion)."""
+        tables = _get_conversation_tables()
+
+        query = text(f"""
             SELECT me.message_uid, 1 - (me.embedding <=> :embedding::vector) as similarity
-            FROM loom_message_embeddings me
+            FROM {tables['embeddings']} me
             WHERE me.embedding IS NOT NULL
             ORDER BY me.embedding <=> :embedding::vector
             LIMIT :limit

@@ -170,7 +170,7 @@ async def generate_embedding(text: str) -> Optional[List[float]]:
         return None
 
     try:
-        from loom.embeddings import embed_text, is_configured
+        from cathedral.shared.embeddings import embed_text, is_configured
 
         if not is_configured():
             return None

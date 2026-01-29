@@ -226,8 +226,12 @@ class SubAgentManager:
                 agent.process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 agent.process.kill()
-            except Exception:
-                pass
+            except Exception as e:
+                # Log but don't fail - process may already be dead
+                import logging
+                logging.getLogger(__name__).warning(
+                    f"Error terminating agent {agent_id} process: {e}"
+                )
 
         agent.status = AgentStatus.CANCELLED
         agent.completed_at = datetime.utcnow().isoformat()

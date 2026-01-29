@@ -3,6 +3,7 @@ Loom - Conversation memory and semantic search system.
 PostgreSQL + pgvector backend with async embedding support.
 """
 
+import os
 import uuid
 import time
 import asyncio
@@ -35,8 +36,12 @@ def disable_discovery():
 
 # Initialize LoomMirror for local summarization (optional, may fail if model not present)
 try:
+    model_path = os.environ.get(
+        "LOOMMIRROR_MODEL_PATH",
+        "./models/memory/tinyllama-1.1b-chat-v1.0.Q8_0.gguf",
+    )
     memory_llm = LoomMirror(
-        model_path="F:/HexyLab/Cathedral-v2/models/memory/tinyllama-1.1b-chat-v1.0.Q8_0.gguf",
+        model_path=model_path,
         model_name="TinyLlama-1.1B",
         n_ctx=2048
     )

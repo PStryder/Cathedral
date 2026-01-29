@@ -6,11 +6,15 @@ Exports provider base class and implementations.
 
 from .base import SearchProviderBase
 from .duckduckgo import DuckDuckGoProvider
+from .searxng import SearXNGProvider
+from .brave import BraveProvider
 from ..models import SearchProvider, ProviderConfig
 
 __all__ = [
     "SearchProviderBase",
     "DuckDuckGoProvider",
+    "SearXNGProvider",
+    "BraveProvider",
     "get_provider",
     "PROVIDERS",
 ]
@@ -18,8 +22,8 @@ __all__ = [
 # Registry of available providers
 PROVIDERS = {
     SearchProvider.DUCKDUCKGO: DuckDuckGoProvider,
-    # SearchProvider.SEARXNG: SearXNGProvider,  # TODO
-    # SearchProvider.BRAVE: BraveProvider,  # TODO
+    SearchProvider.SEARXNG: SearXNGProvider,
+    SearchProvider.BRAVE: BraveProvider,
 }
 
 

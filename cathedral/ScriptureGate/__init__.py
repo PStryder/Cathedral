@@ -42,8 +42,14 @@ from cathedral.ScriptureGate.indexer import (
     build_searchable_text,
 )
 
-# Database - reuse Loom's database connection
-from loom.db import init_db, get_session, get_async_session, is_initialized as db_initialized
+# Database - use shared database utilities (backend-agnostic)
+from cathedral.shared.db import (
+    init_db,
+    get_session,
+    get_async_session,
+    is_initialized as db_initialized,
+    get_engine,
+)
 
 _tables_created = False
 
@@ -57,8 +63,7 @@ def _ensure_tables():
     if not db_initialized():
         init_db()
 
-    from loom.db import LoomDB
-    Base.metadata.create_all(bind=LoomDB.engine)
+    Base.metadata.create_all(bind=get_engine())
     _tables_created = True
 
 

@@ -1,0 +1,851 @@
+"""
+MemoryGate Conversation Service
+
+Provides conversation memory management, replacing Loom with a unified
+implementation under MemoryGate. Supports:
+- Thread management (create, switch, list, delete)
+- Message operations (append, recall, clear)
+- Semantic search over conversations
+- Automatic embedding generation
+- Context composition for LLM prompts
+- Summarization for context compression
+"""
+
+import uuid
+import asyncio
+from typing import List, Optional, Dict, Any
+from datetime import datetime
+
+from sqlalchemy import select, update, delete, func, text
+from sqlalchemy.orm import Session
+
+from .db import (
+    init_conversation_db,
+    get_session,
+    get_async_session,
+    get_raw_session,
+    get_raw_async_session,
+    is_initialized,
+)
+from .models import (
+    ConversationThread,
+    ConversationMessage,
+    ConversationEmbedding,
+    ConversationSummary,
+    EMBEDDING_DIM,
+)
+from .embeddings import (
+    embed_text,
+    embed_texts,
+    embed_text_batch,
+    is_configured as embeddings_configured,
+)
+
+# Optional: LoomMirror for local summarization
+try:
+    from cathedral.Config import get as get_config
+    from loom.LoomMirror import LoomMirror
+    model_path = get_config(
+        "LOOMMIRROR_MODEL_PATH",
+        "./models/memory/tinyllama-1.1b-chat-v1.0.Q8_0.gguf",
+    )
+    _summarizer = LoomMirror(
+        model_path=model_path,
+        model_name="TinyLlama-1.1B",
+        n_ctx=2048
+    )
+    SUMMARIZER_AVAILABLE = True
+except Exception:
+    _summarizer = None
+    SUMMARIZER_AVAILABLE = False
+
+
+def estimate_tokens(messages: List[Dict]) -> int:
+    """Estimate token count from messages (rough approximation)."""
+    return sum(len(m.get('content', '').split()) for m in messages)
+
+
+def truncate_to_fit(messages: List[Dict], token_limit: int) -> List[Dict]:
+    """Truncate messages to fit within token limit, keeping most recent."""
+    result = []
+    token_count = 0
+    for message in reversed(messages):
+        tokens = len(message.get('content', '').split())
+        if token_count + tokens > token_limit:
+            break
+        result.insert(0, message)
+        token_count += tokens
+    return result
+
+
+class ConversationService:
+    """
+    Main conversation service providing thread and message management.
+
+    This replaces Loom's functionality with a MemoryGate-integrated
+    implementation using the same database patterns.
+    """
+
+    def __init__(self):
+        """Initialize the conversation service."""
+        init_conversation_db()
+        self.active_thread_uid: Optional[str] = None
+        self._ensure_default_thread()
+
+    def _ensure_default_thread(self):
+        """Ensure a default thread exists and set it as active."""
+        with get_session() as session:
+            # Check for active thread
+            active = session.execute(
+                select(ConversationThread).where(ConversationThread.is_active == True)
+            ).scalar_one_or_none()
+
+            if active:
+                self.active_thread_uid = active.thread_uid
+                return
+
+            # Check for any thread named 'default'
+            default = session.execute(
+                select(ConversationThread).where(ConversationThread.thread_name == "default")
+            ).scalar_one_or_none()
+
+            if default:
+                default.is_active = True
+                self.active_thread_uid = default.thread_uid
+                return
+
+            # Create new default thread
+            new_thread = ConversationThread(
+                thread_uid=str(uuid.uuid4()),
+                thread_name="default",
+                is_active=True
+            )
+            session.add(new_thread)
+            self.active_thread_uid = new_thread.thread_uid
+
+    # ==========================================================================
+    # Thread Management
+    # ==========================================================================
+
+    def create_thread(self, thread_name: str = "New Thread") -> str:
+        """
+        Create a new thread and set it as active.
+
+        Args:
+            thread_name: Name for the thread (will be made unique if exists)
+
+        Returns:
+            Thread UID
+        """
+        with get_session() as session:
+            base_name = thread_name or "New Thread"
+            final_name = base_name
+            i = 1
+
+            # Find unique name
+            while True:
+                existing = session.execute(
+                    select(ConversationThread).where(ConversationThread.thread_name == final_name)
+                ).scalar_one_or_none()
+                if not existing:
+                    break
+                i += 1
+                final_name = f"{base_name} {i}"
+
+            # Deactivate all threads
+            session.execute(update(ConversationThread).values(is_active=False))
+
+            # Create new thread
+            thread_uid = str(uuid.uuid4())
+            new_thread = ConversationThread(
+                thread_uid=thread_uid,
+                thread_name=final_name,
+                is_active=True
+            )
+            session.add(new_thread)
+
+            self.active_thread_uid = thread_uid
+            return thread_uid
+
+    def switch_thread(self, thread_uid: str) -> bool:
+        """
+        Switch to an existing thread.
+
+        Args:
+            thread_uid: Thread UID to switch to
+
+        Returns:
+            True if successful, False if thread not found
+        """
+        with get_session() as session:
+            thread = session.execute(
+                select(ConversationThread).where(ConversationThread.thread_uid == thread_uid)
+            ).scalar_one_or_none()
+
+            if not thread:
+                return False
+
+            session.execute(update(ConversationThread).values(is_active=False))
+            session.execute(
+                update(ConversationThread)
+                .where(ConversationThread.thread_uid == thread_uid)
+                .values(is_active=True)
+            )
+
+            self.active_thread_uid = thread_uid
+            return True
+
+    def list_threads(self) -> List[Dict]:
+        """List all threads, ordered by most recent first."""
+        with get_session() as session:
+            threads = session.execute(
+                select(ConversationThread).order_by(ConversationThread.updated_at.desc())
+            ).scalars().all()
+            return [t.to_dict() for t in threads]
+
+    def get_thread(self, thread_uid: str) -> Optional[Dict]:
+        """Get a specific thread by UID."""
+        with get_session() as session:
+            thread = session.execute(
+                select(ConversationThread).where(ConversationThread.thread_uid == thread_uid)
+            ).scalar_one_or_none()
+            return thread.to_dict() if thread else None
+
+    def get_active_thread(self) -> Optional[Dict]:
+        """Get the currently active thread."""
+        with get_session() as session:
+            thread = session.execute(
+                select(ConversationThread).where(ConversationThread.is_active == True)
+            ).scalar_one_or_none()
+            return thread.to_dict() if thread else None
+
+    def get_active_thread_uid(self) -> str:
+        """Get the active thread UID."""
+        if not self.active_thread_uid:
+            self._ensure_default_thread()
+        return self.active_thread_uid
+
+    def delete_thread(self, thread_uid: str) -> bool:
+        """
+        Delete a thread and all its messages.
+
+        Args:
+            thread_uid: Thread to delete
+
+        Returns:
+            True if deleted, False if not found
+        """
+        with get_session() as session:
+            thread = session.execute(
+                select(ConversationThread).where(ConversationThread.thread_uid == thread_uid)
+            ).scalar_one_or_none()
+
+            if not thread:
+                return False
+
+            was_active = thread.is_active
+            session.delete(thread)
+
+            # If deleted thread was active, activate another
+            if was_active:
+                other = session.execute(
+                    select(ConversationThread).limit(1)
+                ).scalar_one_or_none()
+                if other:
+                    other.is_active = True
+                    self.active_thread_uid = other.thread_uid
+                else:
+                    self.active_thread_uid = None
+
+            return True
+
+    def rename_thread(self, thread_uid: str, new_name: str) -> bool:
+        """Rename a thread."""
+        with get_session() as session:
+            result = session.execute(
+                update(ConversationThread)
+                .where(ConversationThread.thread_uid == thread_uid)
+                .values(thread_name=new_name, updated_at=datetime.utcnow())
+            )
+            return result.rowcount > 0
+
+    # ==========================================================================
+    # Message Operations
+    # ==========================================================================
+
+    def recall(self, thread_uid: str = None) -> List[Dict]:
+        """
+        Get message history for a thread (sync).
+
+        Args:
+            thread_uid: Thread to recall from (uses active if None)
+
+        Returns:
+            List of message dicts
+        """
+        if not thread_uid:
+            thread_uid = self.active_thread_uid
+        if not thread_uid:
+            raise ValueError("No thread UID provided or active")
+
+        with get_session() as session:
+            messages = session.execute(
+                select(ConversationMessage)
+                .where(ConversationMessage.thread_uid == thread_uid)
+                .order_by(ConversationMessage.timestamp.asc())
+            ).scalars().all()
+            return [m.to_dict() for m in messages]
+
+    async def recall_async(self, thread_uid: str = None) -> List[Dict]:
+        """
+        Get message history for a thread (async).
+
+        Args:
+            thread_uid: Thread to recall from (uses active if None)
+
+        Returns:
+            List of message dicts
+        """
+        if not thread_uid:
+            thread_uid = self.active_thread_uid
+        if not thread_uid:
+            raise ValueError("No thread UID provided or active")
+
+        async with get_async_session() as session:
+            result = await session.execute(
+                select(ConversationMessage)
+                .where(ConversationMessage.thread_uid == thread_uid)
+                .order_by(ConversationMessage.timestamp.asc())
+            )
+            messages = result.scalars().all()
+            return [m.to_dict() for m in messages]
+
+    def append(self, role: str, content: str, thread_uid: str = None) -> str:
+        """
+        Append a message to a thread (sync).
+
+        Args:
+            role: Message role (user, assistant, system)
+            content: Message content
+            thread_uid: Target thread (uses active if None)
+
+        Returns:
+            Message UID
+        """
+        if not thread_uid:
+            thread_uid = self.active_thread_uid
+        if not thread_uid:
+            raise ValueError("No thread UID provided or active")
+
+        message_uid = str(uuid.uuid4())
+
+        with get_session() as session:
+            message = ConversationMessage(
+                message_uid=message_uid,
+                thread_uid=thread_uid,
+                role=role,
+                content=content
+            )
+            session.add(message)
+
+            # Update thread timestamp
+            session.execute(
+                update(ConversationThread)
+                .where(ConversationThread.thread_uid == thread_uid)
+                .values(updated_at=datetime.utcnow())
+            )
+
+        return message_uid
+
+    async def append_async(
+        self,
+        role: str,
+        content: str,
+        thread_uid: str = None,
+        generate_embedding: bool = True
+    ) -> str:
+        """
+        Append a message and optionally generate embedding (async).
+
+        Args:
+            role: Message role (user, assistant, system)
+            content: Message content
+            thread_uid: Target thread (uses active if None)
+            generate_embedding: Whether to generate embedding in background
+
+        Returns:
+            Message UID
+        """
+        if not thread_uid:
+            thread_uid = self.active_thread_uid
+        if not thread_uid:
+            raise ValueError("No thread UID provided or active")
+
+        message_uid = str(uuid.uuid4())
+
+        async with get_async_session() as session:
+            message = ConversationMessage(
+                message_uid=message_uid,
+                thread_uid=thread_uid,
+                role=role,
+                content=content
+            )
+            session.add(message)
+
+            # Update thread timestamp
+            await session.execute(
+                update(ConversationThread)
+                .where(ConversationThread.thread_uid == thread_uid)
+                .values(updated_at=datetime.utcnow())
+            )
+
+        # Generate embedding asynchronously
+        if generate_embedding and embeddings_configured():
+            asyncio.create_task(self._embed_message(message_uid, content))
+
+        return message_uid
+
+    async def _embed_message(self, message_uid: str, content: str) -> None:
+        """Generate and store embedding for a message."""
+        embedding = await embed_text(content)
+        if embedding is None:
+            return
+
+        async with get_async_session() as session:
+            msg_embedding = ConversationEmbedding(
+                message_uid=message_uid,
+                embedding=embedding
+            )
+            session.add(msg_embedding)
+
+    def clear(self, thread_uid: str = None) -> int:
+        """
+        Clear all messages from a thread.
+
+        Args:
+            thread_uid: Thread to clear (uses active if None)
+
+        Returns:
+            Number of messages deleted
+        """
+        if not thread_uid:
+            thread_uid = self.active_thread_uid
+        if not thread_uid:
+            raise ValueError("No thread UID provided or active")
+
+        with get_session() as session:
+            result = session.execute(
+                delete(ConversationMessage).where(ConversationMessage.thread_uid == thread_uid)
+            )
+            return result.rowcount
+
+    # ==========================================================================
+    # Semantic Search
+    # ==========================================================================
+
+    async def semantic_search(
+        self,
+        query: str,
+        thread_uid: str = None,
+        limit: int = 5,
+        include_all_threads: bool = False
+    ) -> List[Dict]:
+        """
+        Search messages semantically using vector similarity.
+
+        Args:
+            query: Search query
+            thread_uid: Limit to specific thread (None for active)
+            limit: Maximum results
+            include_all_threads: Search across all threads
+
+        Returns:
+            Messages ranked by relevance
+        """
+        if not embeddings_configured():
+            return []
+
+        query_embedding = await embed_text(query)
+        if query_embedding is None:
+            return []
+
+        async with get_async_session() as session:
+            # Use raw SQL for pgvector operations
+            if thread_uid and not include_all_threads:
+                sql = text("""
+                    SELECT m.message_uid, m.role, m.content, m.timestamp, m.thread_uid,
+                           1 - (e.embedding <=> :query_embedding::vector) as similarity
+                    FROM mg_conversation_messages m
+                    JOIN mg_conversation_embeddings e ON m.message_uid = e.message_uid
+                    WHERE m.thread_uid = :thread_uid
+                    ORDER BY e.embedding <=> :query_embedding::vector
+                    LIMIT :limit
+                """)
+                result = await session.execute(sql, {
+                    "query_embedding": str(query_embedding),
+                    "thread_uid": thread_uid,
+                    "limit": limit
+                })
+            else:
+                sql = text("""
+                    SELECT m.message_uid, m.role, m.content, m.timestamp, m.thread_uid,
+                           1 - (e.embedding <=> :query_embedding::vector) as similarity
+                    FROM mg_conversation_messages m
+                    JOIN mg_conversation_embeddings e ON m.message_uid = e.message_uid
+                    ORDER BY e.embedding <=> :query_embedding::vector
+                    LIMIT :limit
+                """)
+                result = await session.execute(sql, {
+                    "query_embedding": str(query_embedding),
+                    "limit": limit
+                })
+
+            rows = result.fetchall()
+            return [
+                {
+                    "message_uid": row[0],
+                    "role": row[1],
+                    "content": row[2],
+                    "timestamp": row[3].isoformat() if row[3] else None,
+                    "thread_uid": row[4],
+                    "similarity": float(row[5]) if row[5] else 0.0
+                }
+                for row in rows
+            ]
+
+    async def search_summaries(self, query: str, limit: int = 3) -> List[Dict]:
+        """Search summaries semantically."""
+        if not embeddings_configured():
+            return []
+
+        query_embedding = await embed_text(query)
+        if query_embedding is None:
+            return []
+
+        async with get_async_session() as session:
+            sql = text("""
+                SELECT id, thread_uid, summary_text, created_at,
+                       1 - (embedding <=> :query_embedding::vector) as similarity
+                FROM mg_conversation_summaries
+                WHERE embedding IS NOT NULL
+                ORDER BY embedding <=> :query_embedding::vector
+                LIMIT :limit
+            """)
+            result = await session.execute(sql, {
+                "query_embedding": str(query_embedding),
+                "limit": limit
+            })
+
+            rows = result.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "thread_uid": row[1],
+                    "summary_text": row[2],
+                    "created_at": row[3].isoformat() if row[3] else None,
+                    "similarity": float(row[4]) if row[4] else 0.0
+                }
+                for row in rows
+            ]
+
+    # ==========================================================================
+    # Context Composition
+    # ==========================================================================
+
+    async def compose_context(
+        self,
+        user_input: str,
+        thread_uid: str,
+        preserve_last_n: int = 20,
+        include_semantic: bool = True,
+        semantic_limit: int = 3,
+        max_tokens: int = 4096
+    ) -> List[Dict]:
+        """
+        Build enriched context for LLM prompt.
+
+        Includes thread history with summarization and optional
+        semantic search results from other conversations.
+
+        Args:
+            user_input: Current user input (used for semantic search)
+            thread_uid: Thread to build context for
+            preserve_last_n: Number of recent messages to keep verbatim
+            include_semantic: Include semantically similar messages
+            semantic_limit: Max semantic search results
+            max_tokens: Token budget for context
+
+        Returns:
+            Message list ready for LLM
+        """
+        # Get thread history with summarization
+        history = await self.recall_with_summary_async(
+            preserve_last_n=preserve_last_n,
+            thread_uid=thread_uid
+        )
+
+        result = []
+
+        # Add semantic context if enabled
+        if include_semantic:
+            semantic_results = await self.semantic_search(
+                query=user_input,
+                thread_uid=thread_uid,
+                limit=semantic_limit,
+                include_all_threads=True
+            )
+
+            summary_results = await self.search_summaries(query=user_input, limit=2)
+
+            context_lines = []
+            for r in semantic_results:
+                if r.get("similarity", 0) > 0.5:
+                    context_lines.append(f"- [{r['role']}] {r['content'][:200]}")
+
+            for s in summary_results:
+                if s.get("similarity", 0) > 0.5:
+                    context_lines.append(f"- [summary] {s['summary_text'][:200]}")
+
+            if context_lines:
+                result.append({
+                    "role": "system",
+                    "content": "[RELEVANT CONTEXT]\n" + "\n".join(context_lines)
+                })
+
+        # Add thread history
+        result.extend(history)
+
+        # Truncate to fit context window
+        max_content_tokens = max_tokens - 256  # Leave room for response
+        return truncate_to_fit(result, max_content_tokens)
+
+    # ==========================================================================
+    # Summarization
+    # ==========================================================================
+
+    def recall_with_summary(
+        self,
+        preserve_last_n: int = 20,
+        thread_uid: str = None
+    ) -> List[Dict]:
+        """Get history with early messages summarized (sync)."""
+        if not thread_uid:
+            thread_uid = self.active_thread_uid
+
+        history = self.recall(thread_uid)
+
+        if len(history) <= preserve_last_n:
+            return history
+
+        early = history[:-preserve_last_n]
+        recent = history[-preserve_last_n:]
+
+        summary = self._summarize_messages(early)
+        summary_block = {
+            "role": "system",
+            "content": f"[EARLIER CONVERSATION SUMMARY]\n{summary}"
+        }
+
+        return [summary_block] + recent
+
+    async def recall_with_summary_async(
+        self,
+        preserve_last_n: int = 20,
+        thread_uid: str = None
+    ) -> List[Dict]:
+        """Get history with early messages summarized (async)."""
+        if not thread_uid:
+            thread_uid = self.active_thread_uid
+
+        history = await self.recall_async(thread_uid)
+
+        if len(history) <= preserve_last_n:
+            return history
+
+        early = history[:-preserve_last_n]
+        recent = history[-preserve_last_n:]
+
+        summary = self._summarize_messages(early)
+        summary_block = {
+            "role": "system",
+            "content": f"[EARLIER CONVERSATION SUMMARY]\n{summary}"
+        }
+
+        return [summary_block] + recent
+
+    def _summarize_messages(self, messages: List[Dict]) -> str:
+        """Summarize a list of messages."""
+        if not messages:
+            return "No earlier messages."
+
+        if not SUMMARIZER_AVAILABLE:
+            # Fallback: just show last few messages
+            lines = [f"{m['role']}: {m['content'][:100]}" for m in messages[-5:]]
+            return "Earlier conversation:\n" + "\n".join(lines)
+
+        # Use local summarizer
+        chunk_size = 10
+        chunks = [messages[i:i + chunk_size] for i in range(0, len(messages), chunk_size)]
+        summaries = []
+
+        for chunk in chunks:
+            lines = [f"{m['role'].upper()}: {m['content']}" for m in chunk]
+            dialogue_text = "\n".join(lines)
+            prompt = f"""Summarize this conversation in 2-3 sentences:
+
+{dialogue_text}
+
+SUMMARY:"""
+            try:
+                summary = _summarizer.run(prompt, max_tokens=128)
+                summaries.append(summary.strip())
+            except Exception:
+                summaries.append(f"[{len(chunk)} messages]")
+
+        return " ".join(summaries)
+
+    async def create_summary(
+        self,
+        thread_uid: str,
+        messages: List[Dict]
+    ) -> Optional[int]:
+        """Create and store a summary with embedding."""
+        if not messages:
+            return None
+
+        summary_text = self._summarize_messages(messages)
+
+        # Generate embedding for summary
+        embedding = None
+        if embeddings_configured():
+            embedding = await embed_text(summary_text)
+
+        async with get_async_session() as session:
+            summary = ConversationSummary(
+                thread_uid=thread_uid,
+                summary_text=summary_text,
+                message_count=len(messages),
+                embedding=embedding
+            )
+            session.add(summary)
+            await session.flush()
+            return summary.id
+
+    # ==========================================================================
+    # Backfill Embeddings
+    # ==========================================================================
+
+    async def backfill_embeddings(self, batch_size: int = 50) -> int:
+        """
+        Generate embeddings for messages that don't have them.
+
+        Args:
+            batch_size: Number of messages per batch
+
+        Returns:
+            Number of embeddings generated
+        """
+        if not embeddings_configured():
+            return 0
+
+        async with get_async_session() as session:
+            # Find messages without embeddings
+            sql = text("""
+                SELECT m.message_uid, m.content
+                FROM mg_conversation_messages m
+                LEFT JOIN mg_conversation_embeddings e ON m.message_uid = e.message_uid
+                WHERE e.id IS NULL
+                LIMIT :limit
+            """)
+            result = await session.execute(sql, {"limit": batch_size})
+            rows = result.fetchall()
+
+            if not rows:
+                return 0
+
+            # Generate embeddings in batch
+            message_uids = [row[0] for row in rows]
+            contents = [row[1] for row in rows]
+
+            embeddings = await embed_text_batch(contents)
+
+            # Store embeddings
+            count = 0
+            for message_uid, embedding in zip(message_uids, embeddings):
+                if embedding is not None:
+                    msg_embedding = ConversationEmbedding(
+                        message_uid=message_uid,
+                        embedding=embedding
+                    )
+                    session.add(msg_embedding)
+                    count += 1
+
+            return count
+
+    # ==========================================================================
+    # Statistics
+    # ==========================================================================
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Get conversation statistics."""
+        with get_session() as session:
+            thread_count = session.execute(
+                select(func.count(ConversationThread.id))
+            ).scalar() or 0
+
+            message_count = session.execute(
+                select(func.count(ConversationMessage.id))
+            ).scalar() or 0
+
+            embedded_count = session.execute(
+                select(func.count(ConversationEmbedding.id))
+            ).scalar() or 0
+
+            summary_count = session.execute(
+                select(func.count(ConversationSummary.id))
+            ).scalar() or 0
+
+            return {
+                "threads": thread_count,
+                "messages": message_count,
+                "embedded": embedded_count,
+                "summaries": summary_count,
+                "summarizer_available": SUMMARIZER_AVAILABLE,
+                "embeddings_configured": embeddings_configured(),
+            }
+
+
+# ==========================================================================
+# Module-level singleton and convenience functions
+# ==========================================================================
+
+_service: Optional[ConversationService] = None
+
+
+def get_conversation_service() -> ConversationService:
+    """Get or create global ConversationService instance."""
+    global _service
+    if _service is None:
+        _service = ConversationService()
+    return _service
+
+
+def reset_service() -> None:
+    """Reset the global service instance (for testing)."""
+    global _service
+    _service = None
+
+
+# Export key classes and functions
+__all__ = [
+    "ConversationService",
+    "get_conversation_service",
+    "reset_service",
+    "ConversationThread",
+    "ConversationMessage",
+    "ConversationEmbedding",
+    "ConversationSummary",
+    "init_conversation_db",
+    "is_initialized",
+    "embeddings_configured",
+]

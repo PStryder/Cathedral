@@ -74,6 +74,15 @@ venv\Scripts\activate     # Windows
 pip install -r requirements.txt
 ```
 
+Optional: enable local LoomMirror summarization (llama-cpp-python):
+```bash
+pip install -r requirements-llama.txt
+```
+You can also install from PyPI instead of the local checkout:
+```bash
+pip install llama-cpp-python
+```
+
 4. Set up PostgreSQL with pgvector:
 ```sql
 CREATE DATABASE cathedral;
