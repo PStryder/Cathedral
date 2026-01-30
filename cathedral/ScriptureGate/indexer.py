@@ -4,13 +4,16 @@ ScriptureGate content extraction and indexing.
 Extracts searchable text from files and generates embeddings.
 """
 
-import os
-import json
-from pathlib import Path
-from typing import Optional, List
 import asyncio
+import json
+import os
+from pathlib import Path
+from typing import List, Optional
 
+from cathedral.shared.gate import GateLogger
 from cathedral.ScriptureGate.storage import get_full_path, read_text, read_file
+
+_log = GateLogger.get("ScriptureGate")
 
 
 async def extract_text_content(
@@ -96,7 +99,7 @@ async def _extract_document_text(path: Path, ext: str, mime_type: str = None) ->
         return None
 
     except Exception as e:
-        print(f"[ScriptureGate] Error extracting text from {path}: {e}")
+        _log.error(f" Error extracting text from {path}: {e}")
         return None
 
 
@@ -110,7 +113,7 @@ async def _extract_image_text(path: Path) -> Optional[str]:
         )
         return description
     except Exception as e:
-        print(f"[ScriptureGate] Error describing image {path}: {e}")
+        _log.error(f" Error describing image {path}: {e}")
         return f"Image: {path.name}"
 
 
@@ -121,7 +124,7 @@ async def _extract_audio_text(path: Path) -> Optional[str]:
         transcription = await transcribe_audio(str(path))
         return transcription
     except Exception as e:
-        print(f"[ScriptureGate] Error transcribing audio {path}: {e}")
+        _log.error(f" Error transcribing audio {path}: {e}")
         return f"Audio: {path.name}"
 
 
@@ -141,7 +144,7 @@ async def _extract_thread_text(path: Path) -> Optional[str]:
         return "\n\n".join(messages)
 
     except Exception as e:
-        print(f"[ScriptureGate] Error extracting thread {path}: {e}")
+        _log.error(f" Error extracting thread {path}: {e}")
         return None
 
 
@@ -184,7 +187,7 @@ async def generate_embedding(text: str) -> Optional[List[float]]:
         return embedding
 
     except Exception as e:
-        print(f"[ScriptureGate] Error generating embedding: {e}")
+        _log.error(f" Error generating embedding: {e}")
         return None
 
 

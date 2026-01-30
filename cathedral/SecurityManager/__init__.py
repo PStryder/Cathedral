@@ -24,8 +24,12 @@ Usage:
         SecurityManager.lock()
 """
 
-from typing import Optional, Tuple, Dict, Any
 import base64
+from typing import Any, Dict, Optional, Tuple
+
+from cathedral.shared.gate import GateLogger
+
+_log = GateLogger.get("SecurityManager")
 
 from .crypto import (
     derive_key,
@@ -302,7 +306,7 @@ class SecurityManager:
             return True
 
         except Exception as e:
-            print(f"[SecurityManager] Setup failed: {e}")
+            _log.error(f"Setup failed: {e}")
             return False
 
     @classmethod

@@ -10,7 +10,11 @@ Conversation storage is provided by the MemoryGate conversation service.
 """
 
 import asyncio
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
+
+from cathedral.shared.gate import GateLogger
+
+_log = GateLogger.get("UnifiedMemory")
 
 from .types import (
     MemorySource,
@@ -120,11 +124,21 @@ class UnifiedMemory:
 
         # Optionally extract observations from assistant responses
         if extract_memory and role == "assistant" and self._mg_initialized:
-            asyncio.create_task(
+            task = asyncio.create_task(
                 self._extract_observations(content, thread_uid, message_uid)
             )
+            task.add_done_callback(_handle_extraction_task_exception)
 
         return message_uid
+
+
+def _handle_extraction_task_exception(task: asyncio.Task) -> None:
+    """Handle exceptions from background extraction tasks."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc:
+        _log.error(f" Background extraction failed: {exc}")
 
     async def recall_conversation(
         self,
@@ -587,7 +601,7 @@ class UnifiedMemory:
             return []
         except Exception as e:
             # Don't let extraction failures break the main flow
-            print(f"[UnifiedMemory] Extraction error: {e}")
+            _log.error(f" Extraction error: {e}")
             return []
 
     def _format_knowledge_context(self, results: List[SearchResult]) -> str:

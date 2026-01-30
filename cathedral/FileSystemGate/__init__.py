@@ -28,9 +28,14 @@ Usage:
 """
 
 import os
-import json
 from typing import Optional, List, Dict, Any, Tuple
-from datetime import datetime
+
+from cathedral.shared.gate import (
+    GateLogger,
+    ConfigLoader,
+    PathUtils,
+    build_health_status,
+)
 
 from .models import (
     FolderConfig,
@@ -58,11 +63,15 @@ from .operations import (
 )
 from .backup import BackupManager
 
+# Logger for this gate
+_log = GateLogger.get("FileSystemGate")
 
 # Module-level state
 _config: Optional[FileSystemConfig] = None
 _backup_manager: Optional[BackupManager] = None
 _initialized: bool = False
+_config_path: Optional[str] = None
+_backup_path: Optional[str] = None
 
 # Default paths
 DEFAULT_CONFIG_PATH = "data/config/filesystem.json"
@@ -88,38 +97,34 @@ class FileSystemGate:
         Returns:
             True if initialization successful
         """
-        global _config, _backup_manager, _initialized
+        global _config, _backup_manager, _initialized, _config_path, _backup_path
 
         try:
             # Resolve paths relative to project root
-            if config_path is None:
-                config_path = DEFAULT_CONFIG_PATH
-            if backup_path is None:
-                backup_path = DEFAULT_BACKUP_PATH
+            _config_path = config_path or DEFAULT_CONFIG_PATH
+            _backup_path = backup_path or DEFAULT_BACKUP_PATH
 
             # Ensure directories exist
-            config_dir = os.path.dirname(config_path)
-            if config_dir:
-                os.makedirs(config_dir, exist_ok=True)
-            os.makedirs(backup_path, exist_ok=True)
+            PathUtils.ensure_dirs(_config_path, _backup_path)
 
-            # Load or create config
-            if os.path.exists(config_path):
-                with open(config_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    _config = FileSystemConfig.from_dict(data)
-            else:
+            # Load or create config using ConfigLoader
+            _config = ConfigLoader.load(_config_path, FileSystemConfig, create_default=True)
+            if _config is None:
                 _config = FileSystemConfig()
-                cls._save_config(config_path)
+
+            # Save if newly created
+            if not os.path.exists(_config_path):
+                cls._save_config(_config_path)
 
             # Initialize backup manager
-            _backup_manager = BackupManager(backup_path)
+            _backup_manager = BackupManager(_backup_path)
 
             _initialized = True
+            _log.info("Initialized successfully")
             return True
 
         except Exception as e:
-            print(f"[FileSystemGate] Initialization failed: {e}")
+            _log.error(f"Initialization failed: {e}")
             return False
 
     @classmethod
@@ -134,20 +139,16 @@ class FileSystemGate:
         if _config is None:
             return
 
-        path = config_path or DEFAULT_CONFIG_PATH
-        config_dir = os.path.dirname(path)
-        if config_dir:
-            os.makedirs(config_dir, exist_ok=True)
-
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(_config.to_dict(), f, indent=2, default=str)
+        path = config_path or _config_path or DEFAULT_CONFIG_PATH
+        ConfigLoader.save(path, _config)
 
     @classmethod
     def _get_config(cls) -> FileSystemConfig:
         """Get current config, initializing if needed."""
         global _config
         if _config is None:
-            cls.initialize()
+            if not cls.initialize():
+                raise RuntimeError("FileSystemGate initialization failed. Check config paths and permissions.")
         return _config
 
     @classmethod
@@ -157,6 +158,82 @@ class FileSystemGate:
         if _backup_manager is None:
             cls.initialize()
         return _backup_manager
+
+    @classmethod
+    def _create_backup_if_needed(
+        cls,
+        folder: FolderConfig,
+        relative_path: str,
+        operation: str
+    ) -> Optional[BackupRecord]:
+        """
+        Create a backup if the file exists and policy requires it.
+
+        Args:
+            folder: Folder configuration
+            relative_path: Path relative to folder root
+            operation: Operation type ("modify" or "delete")
+
+        Returns:
+            BackupRecord if backup was created, None otherwise
+        """
+        backup_manager = cls._get_backup_manager()
+        target_path = resolve_folder_path(folder, relative_path)
+
+        if os.path.exists(target_path):
+            return backup_manager.create_backup(folder, target_path, operation)
+        return None
+
+    # ==================== Health Checks ====================
+
+    @classmethod
+    def is_healthy(cls) -> bool:
+        """Check if the gate is operational."""
+        if not _initialized:
+            return False
+
+        try:
+            config = cls._get_config()
+            # Check at least one folder is accessible
+            for folder in config.folders:
+                if os.path.exists(folder.path) and os.access(folder.path, os.R_OK):
+                    return True
+            # No folders configured is still healthy
+            return len(config.folders) == 0
+        except Exception:
+            return False
+
+    @classmethod
+    def get_health_status(cls) -> Dict[str, Any]:
+        """Get detailed health information."""
+        checks = {}
+        details = {}
+
+        if _initialized:
+            config = cls._get_config()
+            accessible_folders = 0
+            for folder in config.folders:
+                is_accessible = os.path.exists(folder.path) and os.access(folder.path, os.R_OK)
+                checks[f"folder_{folder.id}"] = is_accessible
+                if is_accessible:
+                    accessible_folders += 1
+
+            details["folder_count"] = len(config.folders)
+            details["accessible_folders"] = accessible_folders
+            details["backup_path"] = _backup_path
+
+        return build_health_status(
+            gate_name="FileSystemGate",
+            initialized=_initialized,
+            dependencies=["filesystem"],
+            checks=checks,
+            details=details,
+        )
+
+    @classmethod
+    def get_dependencies(cls) -> List[str]:
+        """List external dependencies."""
+        return ["filesystem"]
 
     # ==================== Folder Management ====================
 
@@ -398,12 +475,7 @@ class FileSystemGate:
             )
 
         # Create backup if file exists and policy requires
-        backup_manager = cls._get_backup_manager()
-        target_path = resolve_folder_path(folder, relative_path)
-
-        backup_record = None
-        if os.path.exists(target_path):
-            backup_record = backup_manager.create_backup(folder, target_path, "modify")
+        backup_record = cls._create_backup_if_needed(folder, relative_path, "modify")
 
         # Perform write
         result, _ = op_write_file(folder, relative_path, content, encoding, create_dirs)
@@ -474,12 +546,7 @@ class FileSystemGate:
             )
 
         # Create backup before delete if policy requires
-        backup_manager = cls._get_backup_manager()
-        target_path = resolve_folder_path(folder, relative_path)
-
-        backup_record = None
-        if os.path.exists(target_path):
-            backup_record = backup_manager.create_backup(folder, target_path, "delete")
+        backup_record = cls._create_backup_if_needed(folder, relative_path, "delete")
 
         # Perform delete
         result, _ = op_delete_path(folder, relative_path, recursive)

@@ -1,7 +1,7 @@
 """
 Shared utilities for Cathedral.
 
-Provides access to common functionality used by conversation services.
+Provides access to common functionality used across Gate implementations.
 """
 
 from cathedral.shared.db import (
@@ -24,6 +24,18 @@ from cathedral.shared.embeddings import (
     close_client as close_embedding_client,
 )
 
+from cathedral.shared.gate import (
+    GateLogger,
+    GateErrorHandler,
+    GateHealth,
+    GateOperationResult,
+    ConfigLoader,
+    PathUtils,
+    build_health_status,
+    deep_update,
+    get_logger,
+)
+
 __all__ = [
     # Database
     "init_db",
@@ -41,4 +53,14 @@ __all__ = [
     "embed_text_batch",
     "cosine_similarity",
     "close_embedding_client",
+    # Gate utilities
+    "GateLogger",
+    "GateErrorHandler",
+    "GateHealth",
+    "GateOperationResult",
+    "ConfigLoader",
+    "PathUtils",
+    "build_health_status",
+    "deep_update",
+    "get_logger",
 ]

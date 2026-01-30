@@ -9,14 +9,23 @@ Provides:
 - Export/import for sharing
 """
 
-import os
 import json
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, List, Dict, Any
+
+from cathedral.shared.gate import (
+    GateLogger,
+    ConfigLoader,
+    build_health_status,
+    deep_update,
+)
 
 from .models import Personality, PersonalitySnapshot, LLMConfig
 from .defaults import BUILTIN_PERSONALITIES, get_builtin_personalities
+
+# Logger for this gate
+_log = GateLogger.get("PersonalityGate")
 
 # Storage paths
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -64,7 +73,7 @@ class PersonalityManager:
                 data = json.load(f)
             return Personality.from_dict(data)
         except (json.JSONDecodeError, Exception) as e:
-            print(f"[PersonalityGate] Error loading {personality_id}: {e}")
+            _log.error(f"Error loading {personality_id}: {e}")
             return None
 
     @classmethod
@@ -97,6 +106,95 @@ class PersonalityManager:
         # Fallback to first builtin
         return BUILTIN_PERSONALITIES[0]
 
+    # ==================== Validation ====================
+
+    @classmethod
+    def validate_llm_config(
+        cls,
+        model: str = None,
+        temperature: float = None,
+        max_tokens: int = None,
+        system_prompt: str = None,
+    ) -> tuple[bool, List[str]]:
+        """
+        Validate LLM configuration values.
+
+        Args:
+            model: Model identifier to validate
+            temperature: Temperature value to validate
+            max_tokens: Max tokens value to validate
+            system_prompt: System prompt to validate
+
+        Returns:
+            Tuple of (is_valid, list of error messages)
+        """
+        errors = []
+
+        if model is not None:
+            # Check for common model format issues
+            if not model.strip():
+                errors.append("Model cannot be empty")
+            elif "/" not in model and not model.startswith("gpt-"):
+                # OpenRouter format: provider/model or OpenAI format: gpt-*
+                _log.warning(f"Model '{model}' may not be in standard format (provider/model)")
+
+        if temperature is not None:
+            if not 0.0 <= temperature <= 2.0:
+                errors.append(f"Temperature must be between 0.0 and 2.0, got {temperature}")
+
+        if max_tokens is not None:
+            if not 100 <= max_tokens <= 128000:
+                errors.append(f"Max tokens must be between 100 and 128000, got {max_tokens}")
+
+        if system_prompt is not None:
+            if not system_prompt.strip():
+                errors.append("System prompt cannot be empty")
+            elif len(system_prompt) > 100000:
+                errors.append(f"System prompt too long ({len(system_prompt)} chars, max 100000)")
+
+        return len(errors) == 0, errors
+
+    # ==================== Health Checks ====================
+
+    @classmethod
+    def is_healthy(cls) -> bool:
+        """Check if the gate is operational."""
+        return cls._initialized and PERSONALITIES_DIR.exists()
+
+    @classmethod
+    def get_health_status(cls) -> Dict[str, Any]:
+        """Get detailed health information."""
+        checks = {
+            "personalities_dir_exists": PERSONALITIES_DIR.exists(),
+            "default_personality_exists": cls.exists("default") if cls._initialized else False,
+        }
+
+        details = {
+            "personalities_dir": str(PERSONALITIES_DIR),
+            "cached_count": len(cls._cache),
+            "builtin_count": len(BUILTIN_PERSONALITIES),
+        }
+
+        if cls._initialized:
+            try:
+                all_personalities = list(PERSONALITIES_DIR.glob("*.json"))
+                details["total_count"] = len(all_personalities)
+            except Exception:
+                details["total_count"] = "unknown"
+
+        return build_health_status(
+            gate_name="PersonalityGate",
+            initialized=cls._initialized,
+            dependencies=["filesystem"],
+            checks=checks,
+            details=details,
+        )
+
+    @classmethod
+    def get_dependencies(cls) -> List[str]:
+        """List external dependencies."""
+        return ["filesystem"]
+
     @classmethod
     def create(
         cls,
@@ -128,8 +226,21 @@ class PersonalityManager:
 
         Returns:
             The created Personality
+
+        Raises:
+            ValueError: If LLM configuration is invalid
         """
         cls.initialize()
+
+        # Validate LLM config
+        is_valid, errors = cls.validate_llm_config(
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            system_prompt=system_prompt,
+        )
+        if not is_valid:
+            raise ValueError(f"Invalid LLM configuration: {'; '.join(errors)}")
 
         # Generate ID if not provided
         if not personality_id:
@@ -205,11 +316,8 @@ class PersonalityManager:
     @classmethod
     def _deep_update(cls, base: dict, updates: dict):
         """Deep merge updates into base dict."""
-        for key, value in updates.items():
-            if isinstance(value, dict) and key in base and isinstance(base[key], dict):
-                cls._deep_update(base[key], value)
-            else:
-                base[key] = value
+        # Use shared utility
+        deep_update(base, updates)
 
     @classmethod
     def delete(cls, personality_id: str) -> bool:
@@ -363,7 +471,7 @@ class PersonalityManager:
             return personality
 
         except Exception as e:
-            print(f"[PersonalityGate] Import error: {e}")
+            _log.error(f"Import error: {e}")
             return None
 
     @classmethod

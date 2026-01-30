@@ -23,7 +23,10 @@ Usage:
 """
 
 import time
-from typing import Optional, List
+from typing import Any, Dict, List, Optional
+
+from cathedral.shared.gate import GateLogger, build_health_status
+
 from .models import (
     SearchProvider,
     FetchMode,
@@ -63,6 +66,10 @@ __all__ = [
     # Convenience functions
     "search",
     "fetch",
+    # Health checks
+    "is_healthy",
+    "get_health_status",
+    "get_dependencies",
     # WebSocket server
     "WebSocketServer",
     "ExtensionHandler",
@@ -182,13 +189,15 @@ class BrowserGate:
                 page = await self.fetch(result.url, mode=fetch_mode)
                 pages.append(page)
             except Exception as e:
-                # Create error placeholder
+                # Create error placeholder with all required fields
                 pages.append(PageContent(
                     url=result.url,
                     title=result.title,
                     content=f"[Fetch failed: {e}]",
                     format=self.config.default_format,
                     fetch_mode=fetch_mode or self.config.default_fetch_mode,
+                    fetch_time_ms=0,
+                    word_count=0,
                 ))
 
         return response, pages
@@ -204,6 +213,38 @@ class BrowserGate:
         """List available search providers."""
         return [p.value for p in PROVIDERS.keys()]
 
+    def is_healthy(self) -> bool:
+        """Check if the gate is operational."""
+        # BrowserGate is always operational if instantiated
+        return True
+
+    def get_health_status(self) -> Dict[str, Any]:
+        """Get detailed health information."""
+        checks = {
+            "fetcher_available": self._fetcher is not None,
+        }
+
+        details = {
+            "default_provider": self.config.default_provider.value,
+            "default_fetch_mode": self.config.default_fetch_mode.value,
+            "available_providers": self.list_providers(),
+        }
+
+        return build_health_status(
+            gate_name="BrowserGate",
+            initialized=True,
+            dependencies=["network"],
+            checks=checks,
+            details=details,
+        )
+
+    def get_dependencies(self) -> List[str]:
+        """List external dependencies."""
+        return ["network"]
+
+
+# Logger for this module
+_log = GateLogger.get("BrowserGate")
 
 # Global instance
 _browser: Optional[BrowserGate] = None
@@ -231,3 +272,19 @@ async def fetch(url: str, **kwargs) -> PageContent:
 async def search_and_fetch(query: str, **kwargs) -> tuple[SearchResponse, List[PageContent]]:
     """Search and fetch top results. See BrowserGate.search_and_fetch() for options."""
     return await get_browser().search_and_fetch(query, **kwargs)
+
+
+# Health check functions (module level)
+def is_healthy() -> bool:
+    """Check if the gate is operational."""
+    return get_browser().is_healthy()
+
+
+def get_health_status() -> Dict[str, Any]:
+    """Get detailed health information."""
+    return get_browser().get_health_status()
+
+
+def get_dependencies() -> List[str]:
+    """List external dependencies."""
+    return get_browser().get_dependencies()

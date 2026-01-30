@@ -9,12 +9,17 @@ Centralized configuration with:
 - Auto-discovery of missing config
 """
 
-import os
 import json
+import os
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from datetime import datetime
+
 from dotenv import load_dotenv, set_key
+
+from cathedral.shared.gate import GateLogger
+
+_log = GateLogger.get("Config")
 
 from cathedral.Config.schema import (
     CONFIG_SCHEMA,
@@ -181,7 +186,7 @@ class ConfigManager:
             # Also update environment
             os.environ[key] = str_value
         except Exception as e:
-            print(f"[Config] Warning: Could not update .env: {e}")
+            _log.warning(f"Could not update .env: {e}")
 
     def get_all(self, include_secrets: bool = False) -> Dict[str, Any]:
         """Get all configuration values."""
@@ -189,9 +194,13 @@ class ConfigManager:
         for field in CONFIG_SCHEMA:
             value = self._cache.get(field.key)
             if field.sensitive and not include_secrets:
-                # Mask secrets
+                # Mask secrets - show last 4 chars only if value is long enough
                 if value:
-                    result[field.key] = "***" + str(value)[-4:] if len(str(value)) > 4 else "****"
+                    str_value = str(value)
+                    if len(str_value) > 12:
+                        result[field.key] = "***" + str_value[-4:]
+                    else:
+                        result[field.key] = "****"  # Don't expose any part of short secrets
                 else:
                     result[field.key] = None
             else:

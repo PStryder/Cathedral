@@ -61,12 +61,26 @@ def _build_urls(database_url: str) -> Tuple[str, str]:
     return database_url, database_url
 
 
-def _sqlite_engine_kwargs(sync_url: str) -> dict:
+def _sqlite_sync_engine_kwargs(sync_url: str) -> dict:
+    """Get kwargs for sync SQLite engine."""
     url = make_url(sync_url)
     if not url.drivername.startswith("sqlite"):
         return {}
 
     kwargs: dict = {"connect_args": {"check_same_thread": False}}
+    if url.database in (None, "", ":memory:"):
+        kwargs["poolclass"] = StaticPool
+    return kwargs
+
+
+def _sqlite_async_engine_kwargs(async_url: str) -> dict:
+    """Get kwargs for async SQLite engine (aiosqlite)."""
+    url = make_url(async_url)
+    if not url.drivername.startswith("sqlite"):
+        return {}
+
+    # aiosqlite doesn't need check_same_thread, only poolclass for in-memory
+    kwargs: dict = {}
     if url.database in (None, "", ":memory:"):
         kwargs["poolclass"] = StaticPool
     return kwargs
@@ -88,14 +102,15 @@ def init_db(database_url: str, *, echo: bool = False) -> None:
         raise RuntimeError("database_url is required to initialize the DB service")
 
     sync_url, async_url = _build_urls(database_url)
-    sqlite_kwargs = _sqlite_engine_kwargs(sync_url)
+    sync_sqlite_kwargs = _sqlite_sync_engine_kwargs(sync_url)
+    async_sqlite_kwargs = _sqlite_async_engine_kwargs(async_url)
 
     engine_kwargs = {"echo": echo, "pool_pre_ping": True}
-    engine_kwargs.update(sqlite_kwargs)
+    engine_kwargs.update(sync_sqlite_kwargs)
     _engine = create_engine(sync_url, **engine_kwargs)
 
     async_kwargs = {"echo": echo, "pool_pre_ping": True}
-    async_kwargs.update(sqlite_kwargs)
+    async_kwargs.update(async_sqlite_kwargs)
     _async_engine = create_async_engine(async_url, **async_kwargs)
 
     _SessionLocal = sessionmaker(bind=_engine)
@@ -122,22 +137,30 @@ def _require_initialized() -> None:
 
 
 def get_engine() -> Engine:
+    """Get the sync SQLAlchemy engine. Raises if not initialized."""
     _require_initialized()
+    assert _engine is not None  # Satisfied after _require_initialized
     return _engine
 
 
 def get_async_engine() -> AsyncEngine:
+    """Get the async SQLAlchemy engine. Raises if not initialized."""
     _require_initialized()
+    assert _async_engine is not None  # Satisfied after _require_initialized
     return _async_engine
 
 
 def get_sessionmaker() -> sessionmaker:
+    """Get the sync sessionmaker. Raises if not initialized."""
     _require_initialized()
+    assert _SessionLocal is not None  # Satisfied after _require_initialized
     return _SessionLocal
 
 
 def get_async_sessionmaker() -> async_sessionmaker:
+    """Get the async sessionmaker. Raises if not initialized."""
     _require_initialized()
+    assert _AsyncSessionLocal is not None  # Satisfied after _require_initialized
     return _AsyncSessionLocal
 
 

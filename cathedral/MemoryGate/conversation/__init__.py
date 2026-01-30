@@ -41,23 +41,40 @@ from .embeddings import (
     is_configured as embeddings_configured,
 )
 
-# Optional: LoomMirror for local summarization
-try:
-    from cathedral.Config import get as get_config
-    from .loom_mirror import LoomMirror
-    model_path = get_config(
-        "LOOMMIRROR_MODEL_PATH",
-        "./models/memory/tinyllama-1.1b-chat-v1.0.Q8_0.gguf",
-    )
-    _summarizer = LoomMirror(
-        model_path=model_path,
-        model_name="TinyLlama-1.1B",
-        n_ctx=2048
-    )
-    SUMMARIZER_AVAILABLE = True
-except Exception:
-    _summarizer = None
-    SUMMARIZER_AVAILABLE = False
+# Optional: LoomMirror for local summarization (lazy loaded)
+_summarizer = None
+_summarizer_checked = False
+SUMMARIZER_AVAILABLE = False
+
+
+def _get_summarizer():
+    """Lazy-load the summarizer on first use."""
+    global _summarizer, _summarizer_checked, SUMMARIZER_AVAILABLE
+
+    if _summarizer_checked:
+        return _summarizer
+
+    _summarizer_checked = True
+    try:
+        from cathedral.Config import get as get_config
+        from .loom_mirror import LoomMirror
+        model_path = get_config(
+            "LOOMMIRROR_MODEL_PATH",
+            "./models/memory/tinyllama-1.1b-chat-v1.0.Q8_0.gguf",
+        )
+        _summarizer = LoomMirror(
+            model_path=model_path,
+            model_name="TinyLlama-1.1B",
+            n_ctx=2048
+        )
+        SUMMARIZER_AVAILABLE = True
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).debug(f"LoomMirror not available: {e}")
+        _summarizer = None
+        SUMMARIZER_AVAILABLE = False
+
+    return _summarizer
 
 
 # Knowledge discovery integration (optional, may not be initialized)
@@ -124,7 +141,7 @@ class ConversationService:
         with get_session() as session:
             # Check for active thread
             active = session.execute(
-                select(ConversationThread).where(ConversationThread.is_active == True)
+                select(ConversationThread).where(ConversationThread.is_active.is_(True))
             ).scalar_one_or_none()
 
             if active:
@@ -242,7 +259,7 @@ class ConversationService:
         """Get the currently active thread."""
         with get_session() as session:
             thread = session.execute(
-                select(ConversationThread).where(ConversationThread.is_active == True)
+                select(ConversationThread).where(ConversationThread.is_active.is_(True))
             ).scalar_one_or_none()
             return thread.to_dict() if thread else None
 
@@ -416,9 +433,19 @@ class ConversationService:
 
         # Generate embedding asynchronously
         if generate_embedding and embeddings_configured():
-            asyncio.create_task(self._embed_message(message_uid, thread_uid, content))
+            task = asyncio.create_task(self._embed_message(message_uid, thread_uid, content))
+            task.add_done_callback(self._handle_task_exception)
 
         return message_uid
+
+    def _handle_task_exception(self, task: asyncio.Task) -> None:
+        """Handle exceptions from background tasks to prevent silent failures."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc:
+            import logging
+            logging.getLogger(__name__).error(f"Background task failed: {exc}", exc_info=exc)
 
     async def _embed_message(self, message_uid: str, thread_uid: str, content: str) -> None:
         """Generate and store embedding for a message, then queue discovery."""
@@ -696,7 +723,8 @@ class ConversationService:
         if not messages:
             return "No earlier messages."
 
-        if not SUMMARIZER_AVAILABLE:
+        summarizer = _get_summarizer()
+        if summarizer is None:
             # Fallback: just show last few messages
             lines = [f"{m['role']}: {m['content'][:100]}" for m in messages[-5:]]
             return "Earlier conversation:\n" + "\n".join(lines)
@@ -715,7 +743,7 @@ class ConversationService:
 
 SUMMARY:"""
             try:
-                summary = _summarizer.run(prompt, max_tokens=128)
+                summary = summarizer.run(prompt, max_tokens=128)
                 summaries.append(summary.strip())
             except Exception:
                 summaries.append(f"[{len(chunk)} messages]")
@@ -822,6 +850,9 @@ SUMMARY:"""
             summary_count = session.execute(
                 select(func.count(ConversationSummary.id))
             ).scalar() or 0
+
+            # Trigger lazy check for summarizer availability
+            _get_summarizer()
 
             return {
                 "threads": thread_count,

@@ -12,15 +12,20 @@ All binary content lives here, with searchable indexes in PostgreSQL.
 Other systems (conversation memory, MemoryGate) reference scriptures via refs.
 """
 
-import os
-import json
 import asyncio
-from pathlib import Path
+import json
+import os
 from datetime import datetime
-from typing import Optional, List, Dict, Any, Union, BinaryIO
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union, BinaryIO
 
 from sqlalchemy import select, update, delete, text, or_, and_
 from sqlalchemy.orm import Session
+
+from cathedral.shared.gate import GateLogger, build_health_status
+
+# Logger for this gate
+_log = GateLogger.get("ScriptureGate")
 
 # Import submodules
 from cathedral.ScriptureGate.storage import (
@@ -69,6 +74,53 @@ def _ensure_tables():
 def init_scripture_db() -> None:
     """Initialize scripture tables (explicit)."""
     _ensure_tables()
+
+
+# ==================== Health Checks ====================
+
+
+def is_healthy() -> bool:
+    """Check if the gate is operational."""
+    try:
+        return _tables_created and db_initialized() and SCRIPTURE_ROOT.exists()
+    except Exception:
+        return False
+
+
+def get_health_status() -> Dict[str, Any]:
+    """Get detailed health information."""
+    checks = {
+        "tables_created": _tables_created,
+        "db_initialized": db_initialized(),
+        "storage_dir_exists": SCRIPTURE_ROOT.exists(),
+    }
+
+    details = {
+        "storage_root": str(SCRIPTURE_ROOT),
+    }
+
+    if _tables_created:
+        try:
+            with get_session() as session:
+                count = session.execute(
+                    select(Scripture).where(Scripture.is_deleted.is_(False))
+                ).scalars().all()
+                details["scripture_count"] = len(count)
+        except Exception as e:
+            details["scripture_count"] = f"error: {e}"
+
+    return build_health_status(
+        gate_name="ScriptureGate",
+        initialized=_tables_created,
+        dependencies=["database", "filesystem"],
+        checks=checks,
+        details=details,
+    )
+
+
+def get_dependencies() -> List[str]:
+    """List external dependencies."""
+    return ["database", "filesystem"]
 
 
 # ==================== Store Operations ====================
@@ -153,9 +205,19 @@ async def store(
 
     # Index asynchronously if requested
     if auto_index:
-        asyncio.create_task(_index_scripture(scripture_uid))
+        task = asyncio.create_task(_index_scripture(scripture_uid))
+        task.add_done_callback(_handle_index_task_exception)
 
     return result
+
+
+def _handle_index_task_exception(task: asyncio.Task) -> None:
+    """Handle exceptions from background indexing tasks."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc:
+        _log.error(f"Background indexing failed: {exc}")
 
 
 async def store_text(
@@ -274,8 +336,8 @@ async def backfill_index(batch_size: int = 20) -> int:
     with get_session() as session:
         unindexed = session.execute(
             select(Scripture.scripture_uid)
-            .where(Scripture.is_indexed == False)
-            .where(Scripture.is_deleted == False)
+            .where(Scripture.is_indexed.is_(False))
+            .where(Scripture.is_deleted.is_(False))
             .limit(batch_size)
         ).scalars().all()
 
@@ -388,7 +450,7 @@ def search_by_ref(ref: str) -> Optional[Dict]:
             select(Scripture)
             .where(Scripture.scripture_uid.like(f"{uid_prefix}%"))
             .where(Scripture.file_type == file_type)
-            .where(Scripture.is_deleted == False)
+            .where(Scripture.is_deleted.is_(False))
         ).scalar_one_or_none()
 
         if scripture:
@@ -407,7 +469,7 @@ def get(scripture_uid: str) -> Optional[Dict]:
         scripture = session.execute(
             select(Scripture)
             .where(Scripture.scripture_uid == scripture_uid)
-            .where(Scripture.is_deleted == False)
+            .where(Scripture.is_deleted.is_(False))
         ).scalar_one_or_none()
 
         if scripture:
@@ -429,7 +491,7 @@ def list_scriptures(
     _ensure_tables()
 
     with get_session() as session:
-        query = select(Scripture).where(Scripture.is_deleted == False)
+        query = select(Scripture).where(Scripture.is_deleted.is_(False))
 
         if file_type:
             query = query.where(Scripture.file_type == file_type)
@@ -467,7 +529,7 @@ def read(scripture_uid: str, as_text: bool = False) -> Union[bytes, str, None]:
         scripture = session.execute(
             select(Scripture.file_path)
             .where(Scripture.scripture_uid == scripture_uid)
-            .where(Scripture.is_deleted == False)
+            .where(Scripture.is_deleted.is_(False))
         ).scalar_one_or_none()
 
         if not scripture:
@@ -486,7 +548,7 @@ def get_path(scripture_uid: str) -> Optional[Path]:
         rel_path = session.execute(
             select(Scripture.file_path)
             .where(Scripture.scripture_uid == scripture_uid)
-            .where(Scripture.is_deleted == False)
+            .where(Scripture.is_deleted.is_(False))
         ).scalar_one_or_none()
 
         if rel_path:
@@ -588,16 +650,29 @@ def export_thread(thread_data: list, name: str):
     """Export thread to scripture (legacy compat)."""
     import asyncio
     content = json.dumps({"thread": thread_data}, indent=2)
-    asyncio.get_event_loop().run_until_complete(
-        store(
+
+    # Handle both sync and async contexts
+    try:
+        loop = asyncio.get_running_loop()
+        # We're in an async context - schedule as task
+        loop.create_task(store(
             source=content,
             title=name,
             original_name=f"{name}.thread.json",
             file_type="thread",
             source_type="export",
             tags=["thread", "export"]
-        )
-    )
+        ))
+    except RuntimeError:
+        # No running loop - create one (sync context)
+        asyncio.run(store(
+            source=content,
+            title=name,
+            original_name=f"{name}.thread.json",
+            file_type="thread",
+            source_type="export",
+            tags=["thread", "export"]
+        ))
 
 
 def import_bios(path: str) -> str:
@@ -621,7 +696,7 @@ def stats() -> Dict:
 
     with get_session() as session:
         total = session.execute(
-            select(Scripture).where(Scripture.is_deleted == False)
+            select(Scripture).where(Scripture.is_deleted.is_(False))
         ).scalars().all()
 
         by_type = {}

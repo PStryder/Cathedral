@@ -56,7 +56,7 @@ async def handle_pre_command(
     if lowered == "/forget":
         async def _gen() -> AsyncGenerator[str, None]:
             ctx.loom.clear(ctx.thread_uid)
-            yield "the memory fades\u00e2\u20ac\u201dforgotten by the Cathedral"
+            yield "the memory fades—forgotten by the Cathedral"
         return _gen()
 
     if lowered.startswith("/export thread"):

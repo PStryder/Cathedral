@@ -4,12 +4,17 @@ Async embedding generation for conversation service.
 Uses OpenAI API for generating text embeddings compatible with pgvector.
 """
 
-import os
 import asyncio
+import os
+from pathlib import Path
 from typing import List, Optional
+
 import httpx
 from dotenv import load_dotenv
-from pathlib import Path
+
+from cathedral.shared.gate import GateLogger
+
+_log = GateLogger.get("ConversationEmbeddings")
 
 # Load .env
 env_path = Path(__file__).resolve().parents[3] / ".env"
@@ -95,14 +100,14 @@ async def embed_text(text: str) -> Optional[List[float]]:
             if attempt < EMBEDDING_MAX_RETRIES - 1:
                 await asyncio.sleep(0.5 * (attempt + 1))
             else:
-                print(f"[Conversation Embeddings] HTTP error: {e.response.status_code}")
+                _log.error(f" HTTP error: {e.response.status_code}")
                 return None
 
         except Exception as e:
             if attempt < EMBEDDING_MAX_RETRIES - 1:
                 await asyncio.sleep(0.5 * (attempt + 1))
             else:
-                print(f"[Conversation Embeddings] Error: {e}")
+                _log.error(f" Error: {e}")
                 return None
 
     return None
@@ -177,14 +182,14 @@ async def embed_text_batch(texts: List[str]) -> List[Optional[List[float]]]:
             if attempt < EMBEDDING_MAX_RETRIES - 1:
                 await asyncio.sleep(0.5 * (attempt + 1))
             else:
-                print(f"[Conversation Embeddings] Batch HTTP error: {e.response.status_code}")
+                _log.error(f" Batch HTTP error: {e.response.status_code}")
                 return [None] * len(texts)
 
         except Exception as e:
             if attempt < EMBEDDING_MAX_RETRIES - 1:
                 await asyncio.sleep(0.5 * (attempt + 1))
             else:
-                print(f"[Conversation Embeddings] Batch error: {e}")
+                _log.error(f" Batch error: {e}")
                 return [None] * len(texts)
 
     return [None] * len(texts)

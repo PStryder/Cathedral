@@ -26,11 +26,18 @@ Usage:
     ShellGate.cancel(execution.id)
 """
 
-import os
 import json
+import os
+import uuid
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Tuple, AsyncGenerator
-import uuid
+
+from cathedral.shared.gate import (
+    GateLogger,
+    ConfigLoader,
+    PathUtils,
+    build_health_status,
+)
 
 from .models import (
     CommandConfig,
@@ -58,11 +65,15 @@ from .executor import (
     cleanup_completed,
 )
 
+# Logger for this gate
+_log = GateLogger.get("ShellGate")
 
 # Module-level state
 _config: Optional[ShellConfig] = None
 _history: List[HistoryEntry] = []
 _initialized: bool = False
+_config_path: Optional[str] = None
+_history_path: Optional[str] = None
 
 # Default paths
 DEFAULT_CONFIG_PATH = "data/config/shell.json"
@@ -92,34 +103,29 @@ class ShellGate:
         Returns:
             True if initialization successful
         """
-        global _config, _history, _initialized
+        global _config, _history, _initialized, _config_path, _history_path
 
         try:
             # Resolve paths
-            if config_path is None:
-                config_path = DEFAULT_CONFIG_PATH
-            if history_path is None:
-                history_path = DEFAULT_HISTORY_PATH
+            _config_path = config_path or DEFAULT_CONFIG_PATH
+            _history_path = history_path or DEFAULT_HISTORY_PATH
 
             # Ensure directories exist
-            for path in [config_path, history_path]:
-                dir_path = os.path.dirname(path)
-                if dir_path:
-                    os.makedirs(dir_path, exist_ok=True)
+            PathUtils.ensure_dirs(_config_path, _history_path)
 
-            # Load or create config
-            if os.path.exists(config_path):
-                with open(config_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    _config = ShellConfig.from_dict(data)
-            else:
+            # Load or create config using ConfigLoader
+            _config = ConfigLoader.load(_config_path, ShellConfig, create_default=True)
+            if _config is None:
                 _config = ShellConfig()
-                cls._save_config(config_path)
+
+            # Save if newly created
+            if not os.path.exists(_config_path):
+                cls._save_config(_config_path)
 
             # Load history
-            if os.path.exists(history_path):
+            if os.path.exists(_history_path):
                 try:
-                    with open(history_path, "r", encoding="utf-8") as f:
+                    with open(_history_path, "r", encoding="utf-8") as f:
                         data = json.load(f)
                         _history = [HistoryEntry.model_validate(item) for item in data]
                 except (json.JSONDecodeError, Exception):
@@ -128,10 +134,11 @@ class ShellGate:
                 _history = []
 
             _initialized = True
+            _log.info("Initialized successfully")
             return True
 
         except Exception as e:
-            print(f"[ShellGate] Initialization failed: {e}")
+            _log.error(f"Initialization failed: {e}")
             return False
 
     @classmethod
@@ -146,22 +153,15 @@ class ShellGate:
         if _config is None:
             return
 
-        path = config_path or DEFAULT_CONFIG_PATH
-        dir_path = os.path.dirname(path)
-        if dir_path:
-            os.makedirs(dir_path, exist_ok=True)
-
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(_config.to_dict(), f, indent=2)
+        path = config_path or _config_path or DEFAULT_CONFIG_PATH
+        ConfigLoader.save(path, _config)
 
     @classmethod
     def _save_history(cls, history_path: Optional[str] = None):
         """Save history to disk."""
         global _history
-        path = history_path or DEFAULT_HISTORY_PATH
-        dir_path = os.path.dirname(path)
-        if dir_path:
-            os.makedirs(dir_path, exist_ok=True)
+        path = history_path or _history_path or DEFAULT_HISTORY_PATH
+        PathUtils.ensure_dirs(path)
 
         with open(path, "w", encoding="utf-8") as f:
             json.dump([h.to_dict() for h in _history], f, indent=2, default=str)
@@ -171,8 +171,58 @@ class ShellGate:
         """Get current config, initializing if needed."""
         global _config
         if _config is None:
-            cls.initialize()
+            if not cls.initialize():
+                raise RuntimeError("ShellGate initialization failed. Check config paths and permissions.")
         return _config
+
+    # ==================== Health Checks ====================
+
+    @classmethod
+    def is_healthy(cls) -> bool:
+        """Check if the gate is operational."""
+        if not _initialized:
+            return False
+
+        try:
+            config = cls._get_config()
+            # Check working directory is accessible
+            work_dir = config.command_config.default_working_dir or os.getcwd()
+            return os.path.exists(work_dir) and os.access(work_dir, os.R_OK | os.X_OK)
+        except Exception:
+            return False
+
+    @classmethod
+    def get_health_status(cls) -> Dict[str, Any]:
+        """Get detailed health information."""
+        checks = {}
+        details = {}
+
+        if _initialized:
+            config = cls._get_config()
+            work_dir = config.command_config.default_working_dir or os.getcwd()
+
+            checks["working_dir_accessible"] = os.path.exists(work_dir) and os.access(work_dir, os.R_OK | os.X_OK)
+            checks["history_writable"] = os.access(os.path.dirname(_history_path or DEFAULT_HISTORY_PATH) or ".", os.W_OK)
+
+            details["working_dir"] = work_dir
+            details["blocked_commands"] = len(config.command_config.blocked_commands)
+            details["history_entries"] = len(_history)
+            details["background_tasks"] = len(list_background())
+
+        return build_health_status(
+            gate_name="ShellGate",
+            initialized=_initialized,
+            dependencies=["shell"],
+            checks=checks,
+            details=details,
+        )
+
+    @classmethod
+    def get_dependencies(cls) -> List[str]:
+        """List external dependencies."""
+        return ["shell"]
+
+    # ==================== History ====================
 
     @classmethod
     def _add_to_history(cls, execution: CommandExecution):

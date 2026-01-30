@@ -4,14 +4,18 @@ FileSystemGate backup management.
 Provides backup creation, restoration, and listing for file operations.
 """
 
-import os
 import json
+import os
 import shutil
+import uuid
 from datetime import datetime, timedelta
 from typing import List, Optional
-import uuid
+
+from cathedral.shared.gate import GateLogger
 
 from .models import BackupRecord, FolderConfig, BackupPolicy
+
+_log = GateLogger.get("BackupManager")
 
 
 # Default backup directory relative to data/
@@ -154,7 +158,7 @@ class BackupManager:
             return record
 
         except OSError as e:
-            print(f"[BackupManager] Failed to create backup: {e}")
+            _log.error(f"Failed to create backup: {e}")
             return None
 
     def restore_backup(

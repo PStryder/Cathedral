@@ -3,33 +3,77 @@ MemoryGate integration for Cathedral.
 Direct import of MemoryGate core services (no MCP).
 """
 
-import sys
 import os
+import sys
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
-# Add MemoryGate to path before importing its modules
-MEMORYGATE_PATH = str(Path(__file__).resolve().parents[3] / "lv_stack" / "MemoryGate")
-if MEMORYGATE_PATH not in sys.path:
-    sys.path.insert(0, MEMORYGATE_PATH)
+from dotenv import load_dotenv
+
+from cathedral.shared.gate import (
+    GateLogger,
+    GateErrorHandler,
+    PathUtils,
+    build_health_status,
+)
+
+# Logger for this gate
+_log = GateLogger.get("MemoryGate")
 
 # Load Cathedral's .env which should have MemoryGate config
-from dotenv import load_dotenv
 env_path = Path(__file__).resolve().parents[2] / ".env"
 load_dotenv(dotenv_path=env_path)
 
-# Set defaults for MemoryGate config before importing
-os.environ.setdefault("DB_BACKEND", "postgres")
-os.environ.setdefault("VECTOR_BACKEND", "pgvector")
-os.environ.setdefault("MEMORYGATE_TENANCY_MODE", "single")
-os.environ.setdefault("AUTO_MIGRATE_ON_STARTUP", "true")
-os.environ.setdefault("AUTO_CREATE_EXTENSIONS", "true")
-os.environ.setdefault("LOG_LEVEL", "WARNING")  # Reduce noise
+# Try to find MemoryGate in various locations
+MEMORYGATE_PATH = None
+_memorygate_available = False
 
-# Now import MemoryGate modules
-from core.db import init_db, DB
-from core.context import RequestContext, AuthContext
-from core.services import memory_service
+# Candidate paths (in priority order)
+_candidate_paths = [
+    Path(__file__).resolve().parents[3] / "lv_stack" / "MemoryGate",
+    Path(__file__).resolve().parents[2] / "MemoryGate",
+    Path(os.environ.get("MEMORYGATE_PATH", "")) if os.environ.get("MEMORYGATE_PATH") else None,
+]
+
+# Find module using PathUtils pattern
+for candidate in _candidate_paths:
+    if candidate and candidate.exists() and (candidate / "core").exists():
+        MEMORYGATE_PATH = str(candidate)
+        break
+
+if MEMORYGATE_PATH:
+    if MEMORYGATE_PATH not in sys.path:
+        sys.path.insert(0, MEMORYGATE_PATH)
+
+    # Set defaults for MemoryGate config before importing
+    os.environ.setdefault("DB_BACKEND", "postgres")
+    os.environ.setdefault("VECTOR_BACKEND", "pgvector")
+    os.environ.setdefault("MEMORYGATE_TENANCY_MODE", "single")
+    os.environ.setdefault("AUTO_MIGRATE_ON_STARTUP", "true")
+    os.environ.setdefault("AUTO_CREATE_EXTENSIONS", "true")
+    os.environ.setdefault("LOG_LEVEL", "WARNING")  # Reduce noise
+
+    # Now import MemoryGate modules
+    try:
+        from core.db import init_db, DB
+        from core.context import RequestContext, AuthContext
+        from core.services import memory_service
+        _memorygate_available = True
+    except ImportError as e:
+        _log.warning(f"Failed to import core modules: {e}")
+        init_db = None
+        DB = None
+        RequestContext = None
+        AuthContext = None
+        memory_service = None
+else:
+    _log.warning("MemoryGate path not found. Knowledge features will be disabled.")
+    _log.info("Set MEMORYGATE_PATH environment variable to enable.")
+    init_db = None
+    DB = None
+    RequestContext = None
+    AuthContext = None
+    memory_service = None
 
 # Module-level state
 _initialized = False
@@ -46,16 +90,21 @@ def initialize() -> bool:
     if _initialized:
         return True
 
+    # Check if MemoryGate modules are available
+    if not _memorygate_available or init_db is None:
+        _log.warning("Core modules not available - memory features disabled")
+        return False
+
     # Check required config
     database_url = os.environ.get("DATABASE_URL")
     openai_key = os.environ.get("OPENAI_API_KEY")
 
     if not database_url:
-        print("[MemoryGate] DATABASE_URL not set - memory features disabled")
+        _log.warning("DATABASE_URL not set - memory features disabled")
         return False
 
     if not openai_key:
-        print("[MemoryGate] OPENAI_API_KEY not set - embeddings disabled")
+        _log.warning("OPENAI_API_KEY not set - embeddings disabled")
         # Continue anyway, search will just not work well
 
     try:
@@ -65,11 +114,44 @@ def initialize() -> bool:
             agent_uuid="ag_CATHEDRAL"
         )
         _initialized = True
-        print("[MemoryGate] Initialized successfully")
+        _log.info("Initialized successfully")
         return True
     except Exception as e:
-        print(f"[MemoryGate] Initialization failed: {e}")
+        _log.error(f"Initialization failed: {e}")
         return False
+
+
+# ==================== Health Checks ====================
+
+
+def is_healthy() -> bool:
+    """Check if the gate is operational."""
+    return _initialized and _memorygate_available
+
+
+def get_health_status() -> Dict[str, Any]:
+    """Get detailed health information."""
+    checks = {
+        "memorygate_available": _memorygate_available,
+        "database_url_set": bool(os.environ.get("DATABASE_URL")),
+        "openai_key_set": bool(os.environ.get("OPENAI_API_KEY")),
+    }
+    details = {
+        "memorygate_path": MEMORYGATE_PATH,
+    }
+
+    return build_health_status(
+        gate_name="MemoryGate",
+        initialized=_initialized,
+        dependencies=["MemoryGate external", "PostgreSQL", "OpenAI API"],
+        checks=checks,
+        details=details,
+    )
+
+
+def get_dependencies() -> List[str]:
+    """List external dependencies."""
+    return ["MemoryGate external", "PostgreSQL", "OpenAI API"]
 
 
 def is_initialized() -> bool:
@@ -107,7 +189,7 @@ def store_observation(
             context=ctx
         )
     except Exception as e:
-        print(f"[MemoryGate] store_observation failed: {e}")
+        _log.error(f"store_observation failed: {e}")
         return None
 
 
@@ -133,7 +215,7 @@ def store_pattern(
             context=ctx
         )
     except Exception as e:
-        print(f"[MemoryGate] store_pattern failed: {e}")
+        _log.error(f"store_pattern failed: {e}")
         return None
 
 
@@ -159,7 +241,7 @@ def store_concept(
             context=ctx
         )
     except Exception as e:
-        print(f"[MemoryGate] store_concept failed: {e}")
+        _log.error(f" store_concept failed: {e}")
         return None
 
 
@@ -188,7 +270,7 @@ def search(
         )
         return result.get("results", [])
     except Exception as e:
-        print(f"[MemoryGate] search failed: {e}")
+        _log.error(f" search failed: {e}")
         return []
 
 
@@ -211,7 +293,7 @@ def recall(
         )
         return result.get("observations", [])
     except Exception as e:
-        print(f"[MemoryGate] recall failed: {e}")
+        _log.error(f" recall failed: {e}")
         return []
 
 
@@ -224,7 +306,7 @@ def get_stats() -> Optional[dict]:
     try:
         return memory_service.memory_stats()
     except Exception as e:
-        print(f"[MemoryGate] get_stats failed: {e}")
+        _log.error(f" get_stats failed: {e}")
         return None
 
 
@@ -243,7 +325,7 @@ def get_pattern(category: str, name: str) -> Optional[dict]:
             context=ctx
         )
     except Exception as e:
-        print(f"[MemoryGate] get_pattern failed: {e}")
+        _log.error(f" get_pattern failed: {e}")
         return None
 
 
@@ -266,7 +348,7 @@ def list_patterns(
         )
         return result.get("patterns", [])
     except Exception as e:
-        print(f"[MemoryGate] list_patterns failed: {e}")
+        _log.error(f" list_patterns failed: {e}")
         return []
 
 
@@ -284,7 +366,7 @@ def get_concept(name: str) -> Optional[dict]:
             context=ctx
         )
     except Exception as e:
-        print(f"[MemoryGate] get_concept failed: {e}")
+        _log.error(f" get_concept failed: {e}")
         return None
 
 
@@ -301,7 +383,7 @@ def add_concept_alias(concept_name: str, alias: str) -> Optional[dict]:
             context=ctx
         )
     except Exception as e:
-        print(f"[MemoryGate] add_concept_alias failed: {e}")
+        _log.error(f" add_concept_alias failed: {e}")
         return None
 
 
@@ -327,7 +409,7 @@ def add_concept_relationship(
             context=ctx
         )
     except Exception as e:
-        print(f"[MemoryGate] add_concept_relationship failed: {e}")
+        _log.error(f" add_concept_relationship failed: {e}")
         return None
 
 
@@ -350,7 +432,7 @@ def get_related_concepts(
         )
         return result.get("related", [])
     except Exception as e:
-        print(f"[MemoryGate] get_related_concepts failed: {e}")
+        _log.error(f" get_related_concepts failed: {e}")
         return []
 
 
@@ -378,7 +460,7 @@ def add_relationship(
             context=ctx
         )
     except Exception as e:
-        print(f"[MemoryGate] add_relationship failed: {e}")
+        _log.error(f" add_relationship failed: {e}")
         return None
 
 
@@ -401,7 +483,7 @@ def get_related(
         )
         return result.get("related", [])
     except Exception as e:
-        print(f"[MemoryGate] get_related failed: {e}")
+        _log.error(f" get_related failed: {e}")
         return []
 
 
@@ -425,7 +507,7 @@ def related(
             context=ctx
         )
     except Exception as e:
-        print(f"[MemoryGate] related failed: {e}")
+        _log.error(f" related failed: {e}")
         return None
 
 
@@ -449,7 +531,7 @@ def create_chain(
             context=ctx
         )
     except Exception as e:
-        print(f"[MemoryGate] create_chain failed: {e}")
+        _log.error(f" create_chain failed: {e}")
         return None
 
 
@@ -475,7 +557,7 @@ def append_to_chain(
             context=ctx
         )
     except Exception as e:
-        print(f"[MemoryGate] append_to_chain failed: {e}")
+        _log.error(f" append_to_chain failed: {e}")
         return None
 
 
@@ -492,7 +574,7 @@ def get_chain(chain_id: str, limit: int = 50) -> Optional[dict]:
             context=ctx
         )
     except Exception as e:
-        print(f"[MemoryGate] get_chain failed: {e}")
+        _log.error(f" get_chain failed: {e}")
         return None
 
 
@@ -515,7 +597,7 @@ def list_chains(
         )
         return result.get("chains", [])
     except Exception as e:
-        print(f"[MemoryGate] list_chains failed: {e}")
+        _log.error(f" list_chains failed: {e}")
         return []
 
 
@@ -533,7 +615,7 @@ def get_by_ref(ref: str) -> Optional[dict]:
             context=ctx
         )
     except Exception as e:
-        print(f"[MemoryGate] get_by_ref failed: {e}")
+        _log.error(f" get_by_ref failed: {e}")
         return None
 
 

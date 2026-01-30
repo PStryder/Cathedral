@@ -45,10 +45,17 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
 def _load_origins() -> list[str]:
-    origins = Config.get("ALLOWED_ORIGINS", ["http://localhost:8000", "http://localhost:5000"])
+    default_origins = ["http://localhost:8000", "http://localhost:5000"]
+    origins = Config.get("ALLOWED_ORIGINS", default_origins)
+
     if isinstance(origins, str):
         return [o.strip() for o in origins.split(",") if o.strip()]
-    return origins or []
+    elif isinstance(origins, list):
+        # Ensure all items are strings
+        return [str(o) for o in origins if o]
+    else:
+        # Unexpected type, use defaults
+        return default_origins
 
 
 app = FastAPI()

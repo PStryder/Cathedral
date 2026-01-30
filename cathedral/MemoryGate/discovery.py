@@ -361,8 +361,15 @@ class KnowledgeDiscoveryService:
 
             # Weights: linear increase, recent = 2x oldest
             n = len(embeddings)
+            if n == 0:
+                return
+
             weights = [1.0 + (i / n) for i in range(n)]
             total_weight = sum(weights)
+
+            # Safety check for division by zero (shouldn't happen but defensive)
+            if total_weight == 0:
+                return
 
             # Weighted average
             dim = len(embeddings[0])
@@ -414,6 +421,10 @@ class KnowledgeDiscoveryService:
             return list(row[0])
         return None
 
+    def _format_embedding_for_pgvector(self, embedding: List[float]) -> str:
+        """Format embedding list as pgvector-compatible string."""
+        return "[" + ",".join(str(v) for v in embedding) + "]"
+
     async def _search_memorygate_embeddings(
         self,
         session: AsyncSession,
@@ -426,6 +437,8 @@ class KnowledgeDiscoveryService:
 
         Returns list of (source_id, similarity) tuples.
         """
+        embedding_str = self._format_embedding_for_pgvector(embedding)
+
         query = text("""
             SELECT source_id, 1 - (embedding <=> :embedding::vector) as similarity
             FROM embeddings
@@ -437,7 +450,7 @@ class KnowledgeDiscoveryService:
         """)
 
         result = await session.execute(query, {
-            "embedding": embedding,
+            "embedding": embedding_str,
             "source_type": source_type,
             "limit": limit
         })
@@ -458,6 +471,7 @@ class KnowledgeDiscoveryService:
         Uses MemoryGate conversation tables.
         """
         tables = _get_conversation_tables()
+        embedding_str = self._format_embedding_for_pgvector(embedding)
 
         query = text(f"""
             SELECT me.message_uid, 1 - (me.embedding <=> :embedding::vector) as similarity
@@ -470,7 +484,7 @@ class KnowledgeDiscoveryService:
         """)
 
         result = await session.execute(query, {
-            "embedding": embedding,
+            "embedding": embedding_str,
             "exclude_thread_uid": exclude_thread_uid,
             "limit": limit
         })
@@ -648,6 +662,7 @@ class KnowledgeDiscoveryService:
     ) -> List[Tuple[str, float]]:
         """Search all conversation messages (no exclusion)."""
         tables = _get_conversation_tables()
+        embedding_str = self._format_embedding_for_pgvector(embedding)
 
         query = text(f"""
             SELECT me.message_uid, 1 - (me.embedding <=> :embedding::vector) as similarity
@@ -657,7 +672,7 @@ class KnowledgeDiscoveryService:
             LIMIT :limit
         """)
 
-        result = await session.execute(query, {"embedding": embedding, "limit": limit})
+        result = await session.execute(query, {"embedding": embedding_str, "limit": limit})
         return [(row[0], float(row[1])) for row in result.fetchall()]
 
 

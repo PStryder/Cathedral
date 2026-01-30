@@ -1,5 +1,10 @@
 import os
+
 from llama_cpp import Llama
+
+from cathedral.shared.gate import GateLogger
+
+_log = GateLogger.get("LoomMirror")
 
 
 class LoomMirror:
@@ -17,7 +22,7 @@ class LoomMirror:
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Model path does not exist: {model_path}")
 
-        print(f"[LoomMirror] Initializing memory model '{model_name}' from: {model_path}")
+        _log.info(f"Initializing memory model '{model_name}' from: {model_path}")
         self.llm = Llama(
             model_path=model_path,
             n_ctx=self.n_ctx,
@@ -30,7 +35,7 @@ class LoomMirror:
         Executes a prompt against the utility memory LLM and returns the response.
         This method is suitable for summarization, scoring, and tagging tasks.
         """
-        print(f"[LoomMirror] Running prompt (truncated): {prompt[:60]}...")
+        _log.debug(f"Running prompt (truncated): {prompt[:60]}...")
         output = self.llm(prompt, max_tokens=max_tokens, temperature=temperature)
         return output["choices"][0]["text"].strip()
 

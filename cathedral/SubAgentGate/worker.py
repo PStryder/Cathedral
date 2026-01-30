@@ -23,6 +23,10 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from dotenv import load_dotenv
 load_dotenv(PROJECT_ROOT / ".env")
 
+from cathedral.shared.gate import GateLogger
+
+_log = GateLogger.get("SubAgent")
+
 
 AGENT_DATA_DIR = PROJECT_ROOT / "data" / "agents"
 
@@ -71,9 +75,9 @@ async def run_task(task_data: dict) -> str:
             PersonalityGate.initialize()
             personality = PersonalityGate.load(personality_id)
             if personality:
-                print(f"[SubAgent] Using personality: {personality.name}")
+                _log.info(f"Using personality: {personality.name}")
         except Exception as e:
-            print(f"[SubAgent] Could not load personality: {e}")
+            _log.warning(f"Could not load personality: {e}")
 
     # Use personality settings if available
     if personality:
@@ -119,22 +123,22 @@ Be concise but comprehensive. Focus only on the assigned task."""
 
 async def main(agent_id: str):
     """Main entry point."""
-    print(f"[SubAgent {agent_id}] Starting...")
+    _log.info(f"[{agent_id}] Starting...")
 
     try:
         # Load task
         task_data = load_task(agent_id)
-        print(f"[SubAgent {agent_id}] Task: {task_data['task'][:100]}...")
+        _log.info(f"[{agent_id}] Task: {task_data['task'][:100]}...")
 
         # Execute
         result = await run_task(task_data)
-        print(f"[SubAgent {agent_id}] Completed, result length: {len(result)}")
+        _log.info(f"[{agent_id}] Completed, result length: {len(result)}")
 
         # Save result
         save_result(agent_id, "completed", result=result)
 
     except Exception as e:
-        print(f"[SubAgent {agent_id}] Failed: {e}")
+        _log.error(f"[{agent_id}] Failed: {e}")
         save_result(agent_id, "failed", error=str(e))
         sys.exit(1)
 

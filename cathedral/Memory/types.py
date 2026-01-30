@@ -63,6 +63,13 @@ class SearchResult:
     @classmethod
     def from_conversation_message(cls, msg: Dict[str, Any], similarity: float = 0.0) -> "SearchResult":
         """Create from conversation message dict."""
+        timestamp = None
+        if msg.get("timestamp"):
+            try:
+                timestamp = datetime.fromisoformat(str(msg["timestamp"]))
+            except (ValueError, TypeError):
+                pass  # Invalid timestamp format, leave as None
+
         return cls(
             source=MemorySource.CONVERSATION,
             content=msg.get("content", ""),
@@ -72,12 +79,19 @@ class SearchResult:
                 "role": msg.get("role"),
                 "thread_uid": msg.get("thread_uid"),
             },
-            timestamp=datetime.fromisoformat(msg["timestamp"]) if msg.get("timestamp") else None,
+            timestamp=timestamp,
         )
 
     @classmethod
     def from_conversation_summary(cls, summary: Dict[str, Any], similarity: float = 0.0) -> "SearchResult":
         """Create from conversation summary dict."""
+        timestamp = None
+        if summary.get("created_at"):
+            try:
+                timestamp = datetime.fromisoformat(str(summary["created_at"]))
+            except (ValueError, TypeError):
+                pass  # Invalid timestamp format, leave as None
+
         return cls(
             source=MemorySource.SUMMARY,
             content=summary.get("summary_text", ""),
@@ -86,7 +100,7 @@ class SearchResult:
             metadata={
                 "thread_uid": summary.get("thread_uid"),
             },
-            timestamp=datetime.fromisoformat(summary["created_at"]) if summary.get("created_at") else None,
+            timestamp=timestamp,
         )
 
     # Legacy aliases
@@ -109,6 +123,13 @@ class SearchResult:
         except ValueError:
             source = MemorySource.OBSERVATION
 
+        # Safely parse tier with fallback
+        tier_value = result.get("tier", "hot")
+        try:
+            tier = MemoryTier(tier_value)
+        except ValueError:
+            tier = MemoryTier.HOT
+
         return cls(
             source=source,
             content=result.get("content", result.get("snippet", "")),
@@ -120,7 +141,7 @@ class SearchResult:
             },
             confidence=result.get("confidence"),
             domain=result.get("domain"),
-            tier=MemoryTier(result.get("tier", "hot")),
+            tier=tier,
         )
 
 

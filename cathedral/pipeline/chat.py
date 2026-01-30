@@ -31,7 +31,7 @@ def process_input(user_input: str, thread_uid: str) -> str:
 
     if lowered == "/forget":
         loom.clear(thread_uid)
-        return "the memory fades\u00e2\u20ac\u201dforgotten by the Cathedral"
+        return "the memory fades—forgotten by the Cathedral"
 
     if lowered.startswith("/export thread"):
         parts = command.split()
