@@ -30,6 +30,75 @@ _log = GateLogger.get("SubAgent")
 
 AGENT_DATA_DIR = PROJECT_ROOT / "data" / "agents"
 
+# Limits for context injection to prevent prompt explosion
+MAX_CONTEXT_VALUE_LEN = 500
+MAX_CONTEXT_TOTAL_LEN = 2000
+
+
+def _format_context_value(value, max_len: int = MAX_CONTEXT_VALUE_LEN) -> str:
+    """
+    Safely format a context value for prompt injection.
+
+    - Strings are truncated with ellipsis
+    - Dicts/lists are serialized as compact JSON and truncated
+    - Other types are converted to string and truncated
+    """
+    if value is None:
+        return "null"
+
+    if isinstance(value, str):
+        if len(value) > max_len:
+            return value[:max_len - 3] + "..."
+        return value
+
+    if isinstance(value, (dict, list)):
+        try:
+            # Compact JSON, no extra whitespace
+            serialized = json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+            if len(serialized) > max_len:
+                return serialized[:max_len - 3] + "..."
+            return serialized
+        except (TypeError, ValueError):
+            # Fallback for non-serializable objects
+            fallback = str(value)
+            if len(fallback) > max_len:
+                return fallback[:max_len - 3] + "..."
+            return fallback
+
+    # Numbers, booleans, etc.
+    s = str(value)
+    if len(s) > max_len:
+        return s[:max_len - 3] + "..."
+    return s
+
+
+def _format_context(context: dict, max_total: int = MAX_CONTEXT_TOTAL_LEN) -> str:
+    """
+    Format context dict for safe prompt injection.
+
+    Returns formatted string with truncated values and total length cap.
+    """
+    if not context:
+        return ""
+
+    lines = []
+    current_len = 0
+
+    for k, v in context.items():
+        formatted = _format_context_value(v)
+        line = f"- {k}: {formatted}"
+
+        # Check if adding this line would exceed total limit
+        if current_len + len(line) + 1 > max_total:
+            # Add truncation notice and stop
+            lines.append("- [additional context truncated]")
+            break
+
+        lines.append(line)
+        current_len += len(line) + 1  # +1 for newline
+
+    return "\n".join(lines)
+
 
 def load_task(agent_id: str) -> dict:
     """Load task definition from file."""
@@ -96,10 +165,11 @@ Be concise but comprehensive. Focus only on the assigned task."""
         else:
             system_prompt = default_system
 
-    # Add context if provided
+    # Add context if provided (safely truncated to prevent prompt explosion)
     if context:
-        context_str = "\n".join(f"- {k}: {v}" for k, v in context.items())
-        system_prompt += f"\n\nContext:\n{context_str}"
+        context_str = _format_context(context)
+        if context_str:
+            system_prompt += f"\n\nContext:\n{context_str}"
 
     messages = [
         {"role": "system", "content": system_prompt},
