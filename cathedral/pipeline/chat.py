@@ -9,7 +9,8 @@ from cathedral.runtime import loom, memory, thread_personalities
 from cathedral.services import ServiceRegistry
 from cathedral.MemoryGate.auto_memory import extract_from_exchange, build_memory_context
 from cathedral.StarMirror import reflect, reflect_stream
-from cathedral import ScriptureGate, PersonalityGate, SecurityManager
+from cathedral import ScriptureGate, PersonalityGate, SecurityManager, ToolGate
+from cathedral.ToolGate import PolicyClass, is_tool_response
 
 
 async def _emit(services: ServiceRegistry, event_type: str, message: str, **kwargs) -> None:
@@ -80,8 +81,20 @@ async def process_input_stream(
     user_input: str,
     thread_uid: str,
     services: ServiceRegistry | None = None,
+    enable_tools: bool = False,
 ) -> AsyncGenerator[str, None]:
-    """Process input and stream response tokens. Stores complete response after streaming."""
+    """
+    Process input and stream response tokens.
+
+    Args:
+        user_input: User's message
+        thread_uid: Thread identifier
+        services: Service registry for events
+        enable_tools: Enable tool calling (ToolGate orchestration)
+
+    Yields:
+        Response tokens
+    """
     command = user_input.strip()
     lowered = command.lower()
 
@@ -148,15 +161,59 @@ async def process_input_stream(
         await _emit(services, "system", "RAG context loaded")
         full_history.insert(1, {"role": "system", "content": scripture_context})
 
-    # Stream tokens from StarMirror using personality settings
-    full_response = ""
-    async for token in reflect_stream(
-        full_history,
-        model=personality.llm_config.model,
-        temperature=personality.llm_config.temperature
-    ):
-        full_response += token
-        yield token
+    # Inject tool instructions if tools are enabled
+    if enable_tools:
+        ToolGate.initialize()
+        tool_prompt = ToolGate.build_tool_prompt(
+            enabled_policies={PolicyClass.READ_ONLY}
+        )
+        if tool_prompt:
+            await _emit(services, "tool", "Tool calling enabled")
+            full_history.insert(1, {"role": "system", "content": tool_prompt})
+
+    # Get model response
+    model = personality.llm_config.model
+    temperature = personality.llm_config.temperature
+
+    if enable_tools:
+        # Tool mode: collect full response, then run orchestration loop
+        full_response = ""
+        async for token in reflect_stream(full_history, model=model, temperature=temperature):
+            full_response += token
+
+        # Check if response contains tool calls
+        if is_tool_response(full_response):
+            await _emit(services, "tool", "Processing tool calls")
+
+            # Create orchestrator with event emission
+            async def emit_wrapper(event_type: str, message: str, **kwargs):
+                await _emit(services, event_type, message, **kwargs)
+
+            orchestrator = ToolGate.get_orchestrator(
+                enabled_policies=[PolicyClass.READ_ONLY],
+                emit_event=emit_wrapper,
+            )
+
+            # Run tool loop and yield tokens
+            async for token in orchestrator.execute_loop(
+                initial_response=full_response,
+                messages=full_history,
+                model=model,
+                temperature=temperature,
+            ):
+                yield token
+                full_response = token  # Track final response for storage
+
+        else:
+            # No tool calls, yield the response
+            yield full_response
+
+    else:
+        # Standard mode: stream directly
+        full_response = ""
+        async for token in reflect_stream(full_history, model=model, temperature=temperature):
+            full_response += token
+            yield token
 
     # Store complete assistant response in conversation history (async with embedding)
     await loom.append_async("assistant", full_response, thread_uid=thread_uid)

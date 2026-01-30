@@ -12,6 +12,7 @@ from . import (
     ShellGate,
     BrowserGate,
     ScriptureGate,
+    ToolGate,
 )
 
 __all__ = [
@@ -29,4 +30,5 @@ __all__ = [
     "ShellGate",
     "BrowserGate",
     "ScriptureGate",
+    "ToolGate",
 ]
