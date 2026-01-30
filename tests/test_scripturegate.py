@@ -84,7 +84,7 @@ class TestScriptureStorage:
         )
 
         assert result is not None
-        assert "scripture_uid" in result
+        assert "uid" in result
         assert result["title"] == "Test Document"
         assert result["file_type"] == "document"
         assert "ref" in result
@@ -102,7 +102,7 @@ class TestScriptureStorage:
         )
 
         assert result is not None
-        assert "scripture_uid" in result
+        assert "uid" in result
 
     @pytest.mark.asyncio
     async def test_store_bytes_requires_original_name(self):
@@ -162,12 +162,12 @@ class TestScriptureRetrieval:
     @pytest.mark.asyncio
     async def test_get_by_uid(self, stored_scripture):
         """Should retrieve scripture by UID."""
-        uid = stored_scripture["scripture_uid"]
+        uid = stored_scripture["uid"]
 
         result = get(uid)
 
         assert result is not None
-        assert result["scripture_uid"] == uid
+        assert result["uid"] == uid
         assert result["title"] == "Retrieval Test Doc"
 
     @pytest.mark.asyncio
@@ -196,7 +196,7 @@ class TestScriptureRetrieval:
     @pytest.mark.asyncio
     async def test_read_content(self, stored_scripture):
         """Should read file content."""
-        uid = stored_scripture["scripture_uid"]
+        uid = stored_scripture["uid"]
 
         content = read(uid, as_text=True)
 
@@ -217,7 +217,7 @@ class TestScriptureDeletion:
             original_name="delete_me.txt",
             auto_index=False,
         )
-        uid = result["scripture_uid"]
+        uid = result["uid"]
 
         # Soft delete
         success = remove(uid, hard_delete=False)
@@ -237,7 +237,7 @@ class TestScriptureDeletion:
             original_name="hard_delete.txt",
             auto_index=False,
         )
-        uid = result["scripture_uid"]
+        uid = result["uid"]
 
         # Hard delete
         success = remove(uid, hard_delete=True)
