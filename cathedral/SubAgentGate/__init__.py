@@ -8,13 +8,13 @@ independently and report back when complete.
 import os
 import sys
 import json
+import time
 import uuid
-import asyncio
 import subprocess
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from enum import Enum
 
 
@@ -39,6 +39,7 @@ class SubAgent:
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
     context: Dict[str, Any] = field(default_factory=dict)
+    pid: Optional[int] = None
 
     # Runtime state (not serialized)
     process: Optional[subprocess.Popen] = field(default=None, repr=False)
@@ -54,6 +55,7 @@ class SubAgent:
             "created_at": self.created_at,
             "started_at": self.started_at,
             "completed_at": self.completed_at,
+            "pid": self.pid,
         }
 
     def to_summary(self) -> str:
@@ -74,6 +76,11 @@ AGENT_DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "agents"
 AGENT_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _task_path(agent_id: str) -> Path:
+    """Get path to agent task file."""
+    return AGENT_DATA_DIR / f"{agent_id}.task.json"
+
+
 def _result_path(agent_id: str) -> Path:
     """Get path to agent result file."""
     return AGENT_DATA_DIR / f"{agent_id}.json"
@@ -85,9 +92,38 @@ def _save_agent_result(agent_id: str, result: dict) -> None:
         json.dump(result, f, indent=2)
 
 
-def _load_agent_result(agent_id: str) -> Optional[dict]:
-    """Load agent result from file."""
+def _load_agent_result(agent_id: str, retries: int = 5, delay: float = 0.1) -> Optional[dict]:
+    """
+    Load agent result from file with retry for race condition.
+
+    The worker might still be writing when we first check, so we retry
+    a few times with a short delay.
+    """
     path = _result_path(agent_id)
+
+    for attempt in range(retries):
+        if not path.exists():
+            if attempt < retries - 1:
+                time.sleep(delay)
+                continue
+            return None
+
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            # File might be partially written, retry
+            if attempt < retries - 1:
+                time.sleep(delay)
+                continue
+            return None
+
+    return None
+
+
+def _load_task_data(agent_id: str) -> Optional[dict]:
+    """Load task data from file."""
+    path = _task_path(agent_id)
     if not path.exists():
         return None
     try:
@@ -97,17 +133,106 @@ def _load_agent_result(agent_id: str) -> Optional[dict]:
         return None
 
 
+def _is_process_alive(pid: int) -> bool:
+    """Check if a process with given PID is still running."""
+    if pid is None:
+        return False
+    try:
+        # This works on both Windows and Unix
+        # os.kill with signal 0 doesn't kill, just checks existence
+        if sys.platform == "win32":
+            # Windows: use tasklist or ctypes
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if handle:
+                kernel32.CloseHandle(handle)
+                return True
+            return False
+        else:
+            os.kill(pid, 0)
+            return True
+    except (OSError, ProcessLookupError):
+        return False
+    except Exception:
+        # If we can't determine, assume not alive
+        return False
+
+
+def _generate_unique_id() -> str:
+    """Generate a unique agent ID, ensuring no file collision."""
+    for _ in range(100):  # Limit attempts to prevent infinite loop
+        agent_id = str(uuid.uuid4())[:8]
+        if not _task_path(agent_id).exists() and not _result_path(agent_id).exists():
+            return agent_id
+    # Fallback to full UUID if short IDs keep colliding
+    return str(uuid.uuid4())
+
+
 class SubAgentManager:
     """
     Manages spawned sub-agents.
 
     Tracks running agents, polls for completion, and provides
     an interface for the main agent to interact with sub-agents.
+
+    Persists agent state to files and reconstructs on restart.
     """
 
     def __init__(self):
         self.agents: Dict[str, SubAgent] = {}
         self._worker_script = Path(__file__).parent / "worker.py"
+        self._reconstruct_from_files()
+
+    def _reconstruct_from_files(self) -> None:
+        """
+        Reconstruct agent state from files on startup.
+
+        This handles the case where the server restarts while agents
+        were running or completed.
+        """
+        # Find all task files
+        for task_file in AGENT_DATA_DIR.glob("*.task.json"):
+            agent_id = task_file.stem.replace(".task", "")
+            if agent_id in self.agents:
+                continue  # Already tracked
+
+            task_data = _load_task_data(agent_id)
+            if not task_data:
+                continue
+
+            # Check if result exists
+            result_data = _load_agent_result(agent_id, retries=1)
+
+            agent = SubAgent(
+                id=agent_id,
+                task=task_data.get("task", ""),
+                context=task_data.get("context", {}),
+                created_at=task_data.get("created_at", datetime.utcnow().isoformat()),
+                started_at=task_data.get("started_at"),
+                pid=task_data.get("pid"),
+            )
+
+            if result_data:
+                # Agent completed
+                if result_data.get("status") == "completed":
+                    agent.status = AgentStatus.COMPLETED
+                    agent.result = result_data.get("result", "")
+                else:
+                    agent.status = AgentStatus.FAILED
+                    agent.error = result_data.get("error", "Unknown error")
+                agent.completed_at = result_data.get("completed_at", datetime.utcnow().isoformat())
+            elif agent.pid and _is_process_alive(agent.pid):
+                # Process still running
+                agent.status = AgentStatus.RUNNING
+            else:
+                # No result, process not alive - orphaned/crashed
+                agent.status = AgentStatus.FAILED
+                agent.error = "Worker process died without producing result (recovered after restart)"
+                agent.completed_at = datetime.utcnow().isoformat()
+
+            self.agents[agent_id] = agent
 
     def spawn(
         self,
@@ -134,7 +259,7 @@ class SubAgentManager:
         Returns:
             Agent ID
         """
-        agent_id = str(uuid.uuid4())[:8]
+        agent_id = _generate_unique_id()
 
         agent = SubAgent(
             id=agent_id,
@@ -143,25 +268,8 @@ class SubAgentManager:
             status=AgentStatus.PENDING
         )
 
-        # Prepare task file (subprocess reads this)
-        task_data = {
-            "id": agent_id,
-            "task": task,
-            "context": context or {},
-            "system_prompt": system_prompt,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "personality": personality,
-            "model": model,
-        }
-
-        task_file = AGENT_DATA_DIR / f"{agent_id}.task.json"
-        with open(task_file, "w") as f:
-            json.dump(task_data, f)
-
-        # Spawn subprocess
+        # Spawn subprocess first to get PID
         # Note: Use DEVNULL to avoid pipe deadlock. Results are written to files.
-        # If stderr is needed for debugging, the worker should write to a log file.
         try:
             env = os.environ.copy()
             env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2])
@@ -175,12 +283,32 @@ class SubAgentManager:
             )
 
             agent.process = process
+            agent.pid = process.pid
             agent.status = AgentStatus.RUNNING
             agent.started_at = datetime.utcnow().isoformat()
 
         except Exception as e:
             agent.status = AgentStatus.FAILED
             agent.error = str(e)
+
+        # Save task file with PID for restart recovery
+        task_data = {
+            "id": agent_id,
+            "task": task,
+            "context": context or {},
+            "system_prompt": system_prompt,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "personality": personality,
+            "model": model,
+            "pid": agent.pid,
+            "created_at": agent.created_at,
+            "started_at": agent.started_at,
+        }
+
+        task_file = _task_path(agent_id)
+        with open(task_file, "w") as f:
+            json.dump(task_data, f)
 
         self.agents[agent_id] = agent
         return agent_id
@@ -222,18 +350,31 @@ class SubAgentManager:
         if agent.status != AgentStatus.RUNNING:
             return False
 
+        terminated = False
+
+        # Try process handle first (if we spawned it this session)
         if agent.process:
             try:
                 agent.process.terminate()
                 agent.process.wait(timeout=5)
+                terminated = True
             except subprocess.TimeoutExpired:
                 agent.process.kill()
-            except Exception as e:
-                # Log but don't fail - process may already be dead
-                import logging
-                logging.getLogger(__name__).warning(
-                    f"Error terminating agent {agent_id} process: {e}"
-                )
+                terminated = True
+            except Exception:
+                pass
+
+        # If no process handle but we have PID, try to kill by PID
+        if not terminated and agent.pid:
+            try:
+                if sys.platform == "win32":
+                    subprocess.run(["taskkill", "/F", "/PID", str(agent.pid)],
+                                   capture_output=True, timeout=5)
+                else:
+                    os.kill(agent.pid, 9)  # SIGKILL
+                terminated = True
+            except Exception:
+                pass
 
         agent.status = AgentStatus.CANCELLED
         agent.completed_at = datetime.utcnow().isoformat()
@@ -260,19 +401,24 @@ class SubAgentManager:
         if agent.status != AgentStatus.RUNNING:
             return
 
-        if agent.process is None:
-            return
+        process_done = False
 
-        # Check if process finished
-        retcode = agent.process.poll()
-        if retcode is None:
+        # Check via process handle if available
+        if agent.process is not None:
+            retcode = agent.process.poll()
+            if retcode is not None:
+                process_done = True
+        # Otherwise check via PID
+        elif agent.pid:
+            if not _is_process_alive(agent.pid):
+                process_done = True
+
+        if not process_done:
             return  # Still running
 
-        # Process completed
+        # Process completed - try to load result with retry
         agent.completed_at = datetime.utcnow().isoformat()
-
-        # Load result from file
-        result = _load_agent_result(agent.id)
+        result = _load_agent_result(agent.id, retries=5, delay=0.1)
 
         if result:
             if result.get("status") == "completed":
@@ -282,9 +428,9 @@ class SubAgentManager:
                 agent.status = AgentStatus.FAILED
                 agent.error = result.get("error", "Unknown error")
         else:
-            # No result file - process failed before writing result
+            # No result file after retries
             agent.status = AgentStatus.FAILED
-            agent.error = f"Process exited with code {retcode} (no result file)"
+            agent.error = "Worker process exited without producing result file"
 
     def _check_all(self) -> None:
         """Check all running agents."""
@@ -299,19 +445,24 @@ class SubAgentManager:
         for agent_id, agent in self.agents.items():
             if agent.status in (AgentStatus.COMPLETED, AgentStatus.FAILED, AgentStatus.CANCELLED):
                 if agent.completed_at:
-                    completed = datetime.fromisoformat(agent.completed_at)
-                    age = (now - completed).total_seconds() / 3600
-                    if age > max_age_hours:
+                    try:
+                        completed = datetime.fromisoformat(agent.completed_at)
+                        age = (now - completed).total_seconds() / 3600
+                        if age > max_age_hours:
+                            to_remove.append(agent_id)
+                    except ValueError:
+                        # Invalid timestamp, mark for cleanup
                         to_remove.append(agent_id)
 
         for agent_id in to_remove:
             del self.agents[agent_id]
             # Clean up files
-            result_path = _result_path(agent_id)
-            task_path = AGENT_DATA_DIR / f"{agent_id}.task.json"
-            for p in [result_path, task_path]:
+            for p in [_result_path(agent_id), _task_path(agent_id)]:
                 if p.exists():
-                    p.unlink()
+                    try:
+                        p.unlink()
+                    except OSError:
+                        pass
 
         return len(to_remove)
 
