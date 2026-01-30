@@ -54,6 +54,9 @@ def _get_gate_module(gate_name: str):
     elif gate_name == "SubAgentGate":
         from cathedral import SubAgentGate
         return SubAgentGate
+    elif gate_name == "MCPClient":
+        from cathedral import MCPClient
+        return MCPClient
     else:
         raise ValueError(f"Unknown gate: {gate_name}")
 
@@ -69,6 +72,10 @@ async def _dispatch_tool(tool: ToolDefinition, args: Dict[str, Any]) -> Any:
     Returns:
         Tool execution result
     """
+    # Special handling for MCP tools
+    if tool.gate == "MCPClient":
+        return await _dispatch_mcp_tool(tool, args)
+
     gate = _get_gate_module(tool.gate)
     method = getattr(gate, tool.method)
 
@@ -78,6 +85,38 @@ async def _dispatch_tool(tool: ToolDefinition, args: Dict[str, Any]) -> Any:
         result = method(**args)
 
     return result
+
+
+async def _dispatch_mcp_tool(tool: ToolDefinition, args: Dict[str, Any]) -> Any:
+    """
+    Dispatch an MCP tool call.
+
+    Tool name format: MCP.{server_id}.{tool_name}
+
+    Args:
+        tool: Tool definition
+        args: Tool arguments
+
+    Returns:
+        Tool execution result
+    """
+    from cathedral import MCPClient
+
+    # Parse tool name to extract server_id and tool_name
+    parts = tool.name.split(".", 2)
+    if len(parts) != 3 or parts[0] != "MCP":
+        raise ValueError(f"Invalid MCP tool name format: {tool.name}")
+
+    server_id = parts[1]
+    tool_name = parts[2]
+
+    # Call the MCP tool
+    result = await MCPClient.call_mcp_tool(server_id, tool_name, args)
+
+    if result.success:
+        return result.content
+    else:
+        raise RuntimeError(result.error or "MCP tool call failed")
 
 
 # =============================================================================

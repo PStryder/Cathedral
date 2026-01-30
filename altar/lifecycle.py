@@ -8,6 +8,7 @@ from cathedral import (
     ShellGate,
     BrowserGate,
     ScriptureGate,
+    MCPClient,
     Config,
 )
 from cathedral.shared import db_service
@@ -39,6 +40,17 @@ async def startup(emit_event):
     SecurityManager.initialize()
     FileSystemGate.initialize()
     ShellGate.initialize()
+    MCPClient.initialize()
+
+    # Connect MCP servers with auto_connect enabled
+    try:
+        results = await MCPClient.connect_enabled_servers()
+        connected = sum(1 for v in results.values() if v)
+        total = len(results)
+        if total > 0:
+            _log.info(f"MCPClient connected to {connected}/{total} servers")
+    except Exception as e:
+        _log.error(f"MCPClient auto-connect failed: {e}")
 
     # Start Knowledge Discovery background worker
     try:
@@ -89,6 +101,13 @@ async def startup(emit_event):
 
 async def shutdown():
     """Cleanup on server shutdown."""
+    # Disconnect MCP servers
+    try:
+        await MCPClient.disconnect_all()
+        _log.info("MCPClient disconnected all servers")
+    except Exception as e:
+        _log.error(f"MCPClient shutdown error: {e}")
+
     # Stop Knowledge Discovery worker
     try:
         loom.disable_discovery()

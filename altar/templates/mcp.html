@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cathedral - MCP Servers</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .input-field { @apply w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-gray-100 focus:border-purple-500 focus:outline-none; }
+        .btn { @apply px-4 py-2 rounded font-medium transition-colors cursor-pointer; }
+        .btn-primary { @apply bg-purple-600 hover:bg-purple-700 text-white; }
+        .btn-secondary { @apply bg-gray-600 hover:bg-gray-700 text-white; }
+        .btn-success { @apply bg-green-600 hover:bg-green-700 text-white; }
+        .btn-danger { @apply bg-red-600 hover:bg-red-700 text-white; }
+        .btn-sm { @apply px-2 py-1 text-sm; }
+        .card { @apply bg-gray-800 rounded-lg p-6 border border-gray-700; }
+        .status-connected { @apply text-green-400; }
+        .status-disconnected { @apply text-gray-400; }
+        .status-connecting { @apply text-yellow-400; }
+        .status-error { @apply text-red-400; }
+        .modal { @apply fixed inset-0 bg-black/50 flex items-center justify-center z-50; }
+        .modal-content { @apply bg-gray-800 rounded-lg p-6 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-6xl">
+        <!-- Header -->
+        <div class="flex justify-between items-center mb-8">
+            <div>
+                <h1 class="text-3xl font-bold text-purple-400">MCP Servers</h1>
+                <p class="text-gray-400 mt-1">Manage Model Context Protocol server connections</p>
+            </div>
+            <div class="flex gap-3">
+                <button onclick="showAddModal()" class="btn btn-primary">Add Server</button>
+                <a href="/" class="btn btn-secondary">Back to Chat</a>
+            </div>
+        </div>
+
+        <!-- Stats -->
+        <div class="grid grid-cols-3 gap-4 mb-6">
+            <div class="card">
+                <div class="text-2xl font-bold text-purple-400" id="stat-servers">0</div>
+                <div class="text-gray-400 text-sm">Configured Servers</div>
+            </div>
+            <div class="card">
+                <div class="text-2xl font-bold text-green-400" id="stat-connected">0</div>
+                <div class="text-gray-400 text-sm">Connected</div>
+            </div>
+            <div class="card">
+                <div class="text-2xl font-bold text-blue-400" id="stat-tools">0</div>
+                <div class="text-gray-400 text-sm">Available Tools</div>
+            </div>
+        </div>
+
+        <!-- Server List -->
+        <div class="card">
+            <h2 class="text-lg font-semibold text-purple-400 mb-4">Servers</h2>
+            <div id="server-list" class="space-y-4">
+                <div class="text-gray-500">Loading...</div>
+            </div>
+        </div>
+
+        <!-- Toast -->
+        <div id="toast" class="fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg hidden transition-all transform translate-y-2 opacity-0">
+            <span id="toast-message"></span>
+        </div>
+    </div>
+
+    <!-- Add/Edit Modal -->
+    <div id="server-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3 class="text-xl font-semibold text-purple-400 mb-4" id="modal-title">Add Server</h3>
+            <form onsubmit="saveServer(event)" class="space-y-4">
+                <input type="hidden" id="edit-server-id">
+
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Server ID</label>
+                    <input type="text" id="server-id" class="input-field" placeholder="e.g., memorygate" required>
+                    <p class="text-xs text-gray-500 mt-1">Unique identifier (lowercase, no spaces)</p>
+                </div>
+
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Display Name</label>
+                    <input type="text" id="server-name" class="input-field" placeholder="e.g., MemoryGate MCP" required>
+                </div>
+
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Command</label>
+                    <input type="text" id="server-command" class="input-field" placeholder="e.g., npx, python, node" required>
+                </div>
+
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Arguments (one per line)</label>
+                    <textarea id="server-args" class="input-field h-24" placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;/tmp"></textarea>
+                </div>
+
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Environment Variables (KEY=value, one per line)</label>
+                    <textarea id="server-env" class="input-field h-20" placeholder="API_URL=http://localhost:8000&#10;DEBUG=true"></textarea>
+                </div>
+
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Default Policy</label>
+                    <select id="server-policy" class="input-field">
+                        <option value="network">network</option>
+                        <option value="read_only">read_only</option>
+                        <option value="write">write</option>
+                        <option value="privileged">privileged</option>
+                    </select>
+                </div>
+
+                <div class="flex gap-4">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" id="server-enabled" checked class="w-4 h-4">
+                        <span class="text-gray-300">Enabled</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" id="server-autoconnect" checked class="w-4 h-4">
+                        <span class="text-gray-300">Auto-connect on startup</span>
+                    </label>
+                </div>
+
+                <div class="flex justify-end gap-3 pt-4">
+                    <button type="button" onclick="hideModal()" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Tools Modal -->
+    <div id="tools-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-semibold text-purple-400">Tools</h3>
+                <button onclick="hideToolsModal()" class="text-gray-400 hover:text-gray-200">&times;</button>
+            </div>
+            <div id="tools-list" class="space-y-3 max-h-96 overflow-y-auto">
+                <!-- Populated by JS -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let servers = [];
+
+        async function loadServers() {
+            try {
+                const res = await fetch('/api/mcp/servers');
+                const data = await res.json();
+                servers = data.servers || [];
+                renderServers();
+                updateStats();
+            } catch (e) {
+                console.error('Error loading servers:', e);
+            }
+        }
+
+        function renderServers() {
+            const container = document.getElementById('server-list');
+
+            if (servers.length === 0) {
+                container.innerHTML = '<div class="text-gray-500">No MCP servers configured. Click "Add Server" to get started.</div>';
+                return;
+            }
+
+            container.innerHTML = servers.map(s => `
+                <div class="bg-gray-700/50 rounded-lg p-4">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <span class="status-${s.status}">${getStatusIcon(s.status)}</span>
+                            <div>
+                                <div class="font-medium">${escapeHtml(s.name)}</div>
+                                <div class="text-sm text-gray-400">${escapeHtml(s.id)}</div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-sm text-gray-400">${s.tool_count} tools</span>
+                            ${s.status === 'connected' ? `
+                                <button onclick="showTools('${s.id}')" class="btn btn-secondary btn-sm">Tools</button>
+                                <button onclick="disconnectServer('${s.id}')" class="btn btn-danger btn-sm">Disconnect</button>
+                            ` : `
+                                <button onclick="testServer('${s.id}')" class="btn btn-secondary btn-sm">Test</button>
+                                <button onclick="connectServer('${s.id}')" class="btn btn-success btn-sm">Connect</button>
+                            `}
+                            <button onclick="editServer('${s.id}')" class="btn btn-secondary btn-sm">Edit</button>
+                            <button onclick="deleteServer('${s.id}')" class="btn btn-danger btn-sm">Delete</button>
+                        </div>
+                    </div>
+                    <div class="mt-2 text-sm text-gray-400">
+                        <span class="font-mono">${escapeHtml(s.command)} ${s.args.join(' ')}</span>
+                    </div>
+                    ${s.error_message ? `<div class="mt-2 text-sm text-red-400">${escapeHtml(s.error_message)}</div>` : ''}
+                    <div class="mt-2 flex gap-4 text-xs text-gray-500">
+                        <span>Policy: ${s.default_policy}</span>
+                        <span>${s.enabled ? 'Enabled' : 'Disabled'}</span>
+                        <span>${s.auto_connect ? 'Auto-connect' : 'Manual'}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function updateStats() {
+            document.getElementById('stat-servers').textContent = servers.length;
+            document.getElementById('stat-connected').textContent = servers.filter(s => s.status === 'connected').length;
+            document.getElementById('stat-tools').textContent = servers.reduce((sum, s) => sum + (s.tool_count || 0), 0);
+        }
+
+        function getStatusIcon(status) {
+            switch (status) {
+                case 'connected': return '&#9679;';
+                case 'connecting': return '&#8635;';
+                case 'error': return '&#9888;';
+                default: return '&#9675;';
+            }
+        }
+
+        function showAddModal() {
+            document.getElementById('modal-title').textContent = 'Add Server';
+            document.getElementById('edit-server-id').value = '';
+            document.getElementById('server-id').value = '';
+            document.getElementById('server-id').disabled = false;
+            document.getElementById('server-name').value = '';
+            document.getElementById('server-command').value = '';
+            document.getElementById('server-args').value = '';
+            document.getElementById('server-env').value = '';
+            document.getElementById('server-policy').value = 'network';
+            document.getElementById('server-enabled').checked = true;
+            document.getElementById('server-autoconnect').checked = true;
+            document.getElementById('server-modal').classList.remove('hidden');
+        }
+
+        function editServer(id) {
+            const server = servers.find(s => s.id === id);
+            if (!server) return;
+
+            document.getElementById('modal-title').textContent = 'Edit Server';
+            document.getElementById('edit-server-id').value = id;
+            document.getElementById('server-id').value = id;
+            document.getElementById('server-id').disabled = true;
+            document.getElementById('server-name').value = server.name;
+            document.getElementById('server-command').value = server.command;
+            document.getElementById('server-args').value = server.args.join('\n');
+            document.getElementById('server-env').value = Object.entries(server.env || {}).map(([k, v]) => `${k}=${v}`).join('\n');
+            document.getElementById('server-policy').value = server.default_policy;
+            document.getElementById('server-enabled').checked = server.enabled;
+            document.getElementById('server-autoconnect').checked = server.auto_connect;
+            document.getElementById('server-modal').classList.remove('hidden');
+        }
+
+        function hideModal() {
+            document.getElementById('server-modal').classList.add('hidden');
+        }
+
+        async function saveServer(e) {
+            e.preventDefault();
+
+            const editId = document.getElementById('edit-server-id').value;
+            const isEdit = !!editId;
+
+            const args = document.getElementById('server-args').value.split('\n').filter(a => a.trim());
+            const envLines = document.getElementById('server-env').value.split('\n').filter(l => l.trim());
+            const env = {};
+            envLines.forEach(line => {
+                const idx = line.indexOf('=');
+                if (idx > 0) {
+                    env[line.substring(0, idx)] = line.substring(idx + 1);
+                }
+            });
+
+            const data = {
+                id: document.getElementById('server-id').value.trim(),
+                name: document.getElementById('server-name').value.trim(),
+                command: document.getElementById('server-command').value.trim(),
+                args: args,
+                env: env,
+                default_policy: document.getElementById('server-policy').value,
+                enabled: document.getElementById('server-enabled').checked,
+                auto_connect: document.getElementById('server-autoconnect').checked,
+            };
+
+            try {
+                let res;
+                if (isEdit) {
+                    res = await fetch(`/api/mcp/servers/${editId}`, {
+                        method: 'PUT',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(data)
+                    });
+                } else {
+                    res = await fetch('/api/mcp/servers', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(data)
+                    });
+                }
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Error saving server');
+                }
+
+                hideModal();
+                showToast(isEdit ? 'Server updated' : 'Server added', 'success');
+                loadServers();
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+
+        async function deleteServer(id) {
+            if (!confirm('Delete this server?')) return;
+
+            try {
+                const res = await fetch(`/api/mcp/servers/${id}`, {method: 'DELETE'});
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Error deleting server');
+                }
+
+                showToast('Server deleted', 'success');
+                loadServers();
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+
+        async function connectServer(id) {
+            try {
+                const res = await fetch(`/api/mcp/servers/${id}/connect`, {method: 'POST'});
+                const data = await res.json();
+
+                if (!res.ok) {
+                    throw new Error(data.detail || 'Connection failed');
+                }
+
+                showToast(`Connected! Found ${data.tool_count} tools`, 'success');
+                loadServers();
+            } catch (e) {
+                showToast(e.message, 'error');
+                loadServers();
+            }
+        }
+
+        async function disconnectServer(id) {
+            try {
+                const res = await fetch(`/api/mcp/servers/${id}/disconnect`, {method: 'POST'});
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Disconnect failed');
+                }
+
+                showToast('Disconnected', 'success');
+                loadServers();
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+
+        async function testServer(id) {
+            showToast('Testing connection...', 'info');
+
+            try {
+                const res = await fetch(`/api/mcp/servers/${id}/test`, {method: 'POST'});
+                const data = await res.json();
+
+                if (data.status === 'success') {
+                    showToast(data.message, 'success');
+                } else {
+                    showToast(data.message, 'error');
+                }
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+
+        async function showTools(id) {
+            try {
+                const res = await fetch(`/api/mcp/servers/${id}/tools`);
+                const data = await res.json();
+                const tools = data.tools || [];
+
+                const container = document.getElementById('tools-list');
+
+                if (tools.length === 0) {
+                    container.innerHTML = '<div class="text-gray-500">No tools available</div>';
+                } else {
+                    container.innerHTML = tools.map(t => `
+                        <div class="bg-gray-700/50 rounded p-3">
+                            <div class="font-medium text-purple-300">${escapeHtml(t.name)}</div>
+                            <div class="text-sm text-gray-400 mt-1">${escapeHtml(t.description || 'No description')}</div>
+                            ${t.inputSchema && t.inputSchema.properties ? `
+                                <div class="mt-2 text-xs text-gray-500">
+                                    Parameters: ${Object.keys(t.inputSchema.properties).join(', ') || 'none'}
+                                </div>
+                            ` : ''}
+                        </div>
+                    `).join('');
+                }
+
+                document.getElementById('tools-modal').classList.remove('hidden');
+            } catch (e) {
+                showToast('Error loading tools', 'error');
+            }
+        }
+
+        function hideToolsModal() {
+            document.getElementById('tools-modal').classList.add('hidden');
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            const toastMsg = document.getElementById('toast-message');
+
+            toast.className = 'fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg transition-all transform';
+
+            if (type === 'success') {
+                toast.classList.add('bg-green-800', 'text-green-100');
+            } else if (type === 'error') {
+                toast.classList.add('bg-red-800', 'text-red-100');
+            } else {
+                toast.classList.add('bg-gray-800', 'text-gray-100');
+            }
+
+            toastMsg.textContent = message;
+            toast.classList.remove('hidden', 'translate-y-2', 'opacity-0');
+
+            setTimeout(() => {
+                toast.classList.add('translate-y-2', 'opacity-0');
+                setTimeout(() => toast.classList.add('hidden'), 300);
+            }, 3000);
+        }
+
+        // Auto-refresh every 10 seconds
+        setInterval(() => {
+            if (!document.hidden) loadServers();
+        }, 10000);
+
+        // Close modals on escape
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                hideModal();
+                hideToolsModal();
+            }
+        });
+
+        // Initialize
+        loadServers();
+    </script>
+</body>
+</html>

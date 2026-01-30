@@ -13,6 +13,7 @@ from . import (
     BrowserGate,
     ScriptureGate,
     ToolGate,
+    MCPClient,
 )
 
 __all__ = [
@@ -31,4 +32,5 @@ __all__ = [
     "BrowserGate",
     "ScriptureGate",
     "ToolGate",
+    "MCPClient",
 ]

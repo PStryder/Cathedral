@@ -21,6 +21,7 @@ GATE_REGISTRY: Dict[str, Tuple[str, str, Optional[str]]] = {
     "MemoryGate": ("cathedral", "MemoryGate", None),
     "ScriptureGate": ("cathedral", "ScriptureGate", None),
     "ToolGate": ("cathedral", "ToolGate", None),
+    "MCPClient": ("cathedral", "MCPClient", None),
 }
 
 

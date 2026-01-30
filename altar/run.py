@@ -20,6 +20,7 @@ from altar.api import (
     events,
     files,
     health,
+    mcp,
     memory,
     personalities,
     scripture,
@@ -39,6 +40,7 @@ from cathedral import (
     BrowserGate,
     Config,
     FileSystemGate,
+    MCPClient,
     MemoryGate,
     PersonalityGate,
     ScriptureGate,
@@ -114,3 +116,4 @@ app.include_router(scripture.create_router(templates, ScriptureGate, emit_event)
 app.include_router(memory.create_router(templates, MemoryGate, emit_event))
 app.include_router(subagent.create_router(templates, SubAgentGate, emit_event))
 app.include_router(toolgate.create_router(templates))
+app.include_router(mcp.create_router(templates, MCPClient, emit_event))

@@ -387,6 +387,8 @@ class ToolRegistry:
     """Central registry of all available tools."""
 
     _tools: Dict[str, ToolDefinition] = {}
+    _external_tools: Dict[str, ToolDefinition] = {}
+    _external_tool_servers: Dict[str, str] = {}  # tool_name -> server_id
     _initialized: bool = False
 
     @classmethod
@@ -436,18 +438,23 @@ class ToolRegistry:
     def get_tool(cls, name: str) -> Optional[ToolDefinition]:
         """Get tool definition by name."""
         cls.initialize()
-        return cls._tools.get(name)
+        # Check built-in tools first, then external
+        return cls._tools.get(name) or cls._external_tools.get(name)
 
     @classmethod
     def list_tools(
         cls,
         policy_filter: Optional[Set[PolicyClass]] = None,
         gate_filter: Optional[str] = None,
+        include_external: bool = True,
     ) -> List[ToolDefinition]:
         """List tools, optionally filtered."""
         cls.initialize()
 
+        # Combine built-in and external tools
         tools = list(cls._tools.values())
+        if include_external:
+            tools.extend(cls._external_tools.values())
 
         if policy_filter:
             tools = [t for t in tools if t.policy_class in policy_filter]
@@ -480,7 +487,112 @@ class ToolRegistry:
     def reset(cls) -> None:
         """Reset registry (for testing)."""
         cls._tools = {}
+        cls._external_tools = {}
+        cls._external_tool_servers = {}
         cls._initialized = False
+
+    # =========================================================================
+    # External Tool Registration (for MCP servers)
+    # =========================================================================
+
+    @classmethod
+    def register_external_tool(
+        cls,
+        server_id: str,
+        server_name: str,
+        tool: Any,  # MCPTool
+        policy_class: str = "network",
+    ) -> None:
+        """
+        Register an external tool from an MCP server.
+
+        Args:
+            server_id: MCP server identifier
+            server_name: Human-readable server name
+            tool: MCPTool instance with name, description, input_schema
+            policy_class: Policy class string (read_only, network, write, privileged)
+        """
+        # Build full tool name: MCP.{server_id}.{tool_name}
+        full_name = f"MCP.{server_id}.{tool.name}"
+
+        # Map policy string to PolicyClass
+        policy_map = {
+            "read_only": PolicyClass.READ_ONLY,
+            "network": PolicyClass.NETWORK,
+            "write": PolicyClass.WRITE,
+            "privileged": PolicyClass.PRIVILEGED,
+            "destructive": PolicyClass.DESTRUCTIVE,
+        }
+        policy = policy_map.get(policy_class.lower(), PolicyClass.NETWORK)
+
+        # Build args schema from MCP input schema
+        args_schema = {}
+        input_schema = getattr(tool, "input_schema", None)
+        if input_schema:
+            properties = getattr(input_schema, "properties", {}) or {}
+            required_list = getattr(input_schema, "required", []) or []
+
+            for prop_name, prop_def in properties.items():
+                if isinstance(prop_def, dict):
+                    args_schema[prop_name] = ArgSchema(
+                        type=prop_def.get("type", "string"),
+                        description=prop_def.get("description", ""),
+                        required=prop_name in required_list,
+                        default=prop_def.get("default"),
+                        enum=prop_def.get("enum"),
+                    )
+
+        tool_def = ToolDefinition(
+            name=full_name,
+            description=f"[{server_name}] {tool.description}" if tool.description else f"[{server_name}] MCP tool",
+            gate="MCPClient",
+            method=tool.name,
+            policy_class=policy,
+            is_async=True,  # MCP tools are always async
+            args_schema=args_schema,
+        )
+
+        cls._external_tools[full_name] = tool_def
+        cls._external_tool_servers[full_name] = server_id
+
+        _log.debug(f"Registered external tool: {full_name}")
+
+    @classmethod
+    def unregister_server_tools(cls, server_id: str) -> int:
+        """
+        Unregister all tools from a specific MCP server.
+
+        Args:
+            server_id: MCP server identifier
+
+        Returns:
+            Number of tools unregistered
+        """
+        # Find tools belonging to this server
+        tools_to_remove = [
+            name for name, sid in cls._external_tool_servers.items()
+            if sid == server_id
+        ]
+
+        # Remove them
+        for tool_name in tools_to_remove:
+            cls._external_tools.pop(tool_name, None)
+            cls._external_tool_servers.pop(tool_name, None)
+
+        if tools_to_remove:
+            _log.debug(f"Unregistered {len(tools_to_remove)} tools from server {server_id}")
+
+        return len(tools_to_remove)
+
+    @classmethod
+    def get_external_tool_server(cls, tool_name: str) -> Optional[str]:
+        """Get the server ID for an external tool."""
+        return cls._external_tool_servers.get(tool_name)
+
+    @classmethod
+    def list_external_tools(cls) -> List[ToolDefinition]:
+        """List all external (MCP) tools."""
+        return list(cls._external_tools.values())
 
 
 __all__ = [
