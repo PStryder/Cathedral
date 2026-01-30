@@ -174,6 +174,19 @@ Cathedral is a modular AI assistant platform with persistent memory, document re
 | `POST` | `/api/agents/check` | Check for completed agents |
 | `POST` | `/api/agents/cleanup` | Clean up old agents |
 
+### ToolGate (Tool Calling)
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `GET` | `/toolgate` | Tool Protocol editor UI |
+| `GET` | `/api/toolgate/prompt` | Get current tool prompt config |
+| `GET` | `/api/toolgate/prompt/default` | Get default tool prompt |
+| `GET` | `/api/toolgate/prompt/warning` | Get edit warning message |
+| `POST` | `/api/toolgate/prompt` | Update tool prompt (requires acknowledgment) |
+| `POST` | `/api/toolgate/prompt/restore` | Restore default prompt |
+| `GET` | `/api/toolgate/prompt/validate` | Validate prompt syntax |
+| `GET` | `/api/toolgate/tools` | List available tools |
+| `GET` | `/api/toolgate/status` | ToolGate health status |
+
 ---
 
 ## 2. Slash Commands (Chat Interface)
@@ -403,6 +416,36 @@ transcribe_audio(path)      # Audio-to-text
 - Field-based queries
 - Policy enforcement (rate limiting, restrictions)
 
+### ToolGate (Tool Calling)
+**Purpose**: Provider-agnostic tool calling for AI agents
+
+**Features**:
+- JSON-in-text protocol (works with any LLM)
+- 31 tools across 6 Gates
+- Policy classes: READ_ONLY, WRITE, DESTRUCTIVE, PRIVILEGED, NETWORK
+- Bounded execution loop (max iterations, calls per step)
+- Configurable, versioned system prompt
+- Safe fallback on broken custom prompts
+- UI for prompt editing and tool browsing
+
+**Key Functions**:
+```python
+build_tool_prompt(policies)    # Generate tool prompt for LLM
+parse_tool_calls(response)     # Extract tool calls from response
+execute_single(call)           # Execute one tool call
+create_orchestrator(policies)  # Create execution orchestrator
+```
+
+**Available Tools**:
+| Gate | Tools |
+|------|-------|
+| MemoryGate | search, recall, store_observation, get_concept, get_related, add_relationship, get_stats |
+| FileSystemGate | list_dir, read_file, write_file, mkdir, delete, info, list_folders |
+| ShellGate | execute, validate_command, estimate_risk, get_history |
+| ScriptureGate | search, build_context, store_text, get, list_scriptures, stats |
+| BrowserGate | search, fetch |
+| SubAgentGate | spawn, status, result, list_agents, cancel |
+
 ---
 
 ## 4. Configuration
@@ -417,6 +460,7 @@ transcribe_audio(path)      # Audio-to-text
 | **SERVER** | `HOST`, `PORT`, `ALLOWED_ORIGINS`, `DEBUG`, `LOG_LEVEL` |
 | **MODELS** | `DEFAULT_MODEL`, `VISION_MODEL`, `EMBEDDING_MODEL`, `LOOMMIRROR_MODEL_PATH` |
 | **FEATURES** | `ENABLE_MEMORY_GATE`, `ENABLE_SCRIPTURE_RAG`, `ENABLE_SUBAGENTS`, `ENABLE_MULTIMODAL`, `AUTO_EXTRACT_MEMORY` |
+| **TOOL_PROTOCOL** | `TOOL_PROTOCOL_PROMPT`, `TOOL_MAX_ITERATIONS`, `TOOL_MAX_CALLS_PER_STEP`, `TOOL_MAX_TOTAL_CALLS` |
 
 ### Configuration Priority
 1. Environment variables (highest)
@@ -436,17 +480,24 @@ User Input → Chat Pipeline
         │
         ├─ 1. Append to Loom (conversation memory)
         │
-        ├─ 2. Build Context:
-        │     ├─ Conversation history
-        │     ├─ Memory injection (MemoryGate)
-        │     └─ RAG context (ScriptureGate)
+        ├─ 2. Build Context (Cathedral Context Assembly Order):
+        │     ├─ [0] Tool Protocol prompt (if tools enabled)
+        │     ├─ [1] Personality system prompt
+        │     ├─ [2] Current user message
+        │     ├─ [3] Memory context (MemoryGate)
+        │     ├─ [4] RAG context (ScriptureGate)
+        │     └─ [5+] Prior conversation history
         │
-        ├─ 3. Apply Personality (system prompt, model settings)
-        │
-        ├─ 4. Call StarMirror (LLM)
+        ├─ 3. Call StarMirror (LLM)
         │     └─ Stream tokens → SSE → Client
         │
-        ├─ 5. Store Response in Loom
+        ├─ 4. Tool Execution Loop (if tools enabled):
+        │     ├─ Parse tool calls from response
+        │     ├─ Execute via ToolGate orchestrator
+        │     ├─ Inject results into conversation
+        │     └─ Get next response (repeat until done)
+        │
+        ├─ 5. Store Final Response in Loom
         │
         └─ 6. Post-Processing:
               ├─ Auto-extract memory (if enabled)
@@ -467,7 +518,8 @@ User Input → Chat Pipeline
 | **Embeddings** | OpenAI text-embedding-3-small |
 | **Encryption** | AES-256-GCM + Argon2id |
 | **Events** | Server-Sent Events (SSE) |
-| **Frontend** | Jinja2 templates + static assets |
+| **Frontend** | Jinja2 templates + Tailwind CSS |
+| **Tool Calling** | Provider-agnostic JSON protocol (31 tools) |
 
 ---
 
@@ -490,6 +542,7 @@ uvicorn altar.run:app --reload
 
 ### Required Configuration
 - `OPENROUTER_API_KEY` - For LLM access
+- `OPENAI_API_KEY` - For embeddings (semantic search)
 - `DATABASE_URL` - PostgreSQL connection string (optional, defaults to SQLite)
 
 ### Default URLs
