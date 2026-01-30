@@ -11,6 +11,7 @@ from cathedral import (
     Config,
 )
 from cathedral.shared import db_service
+from cathedral.shared.logging import GateLogger
 from cathedral.MemoryGate.conversation import db as conversation_db
 from cathedral.MemoryGate.discovery import (
     start_discovery,
@@ -18,6 +19,9 @@ from cathedral.MemoryGate.discovery import (
     queue_message_discovery,
 )
 from cathedral.runtime import loom
+
+# Lifecycle logger
+_log = GateLogger.get("Lifecycle")
 
 
 async def startup(emit_event):
@@ -28,7 +32,7 @@ async def startup(emit_event):
         conversation_db.init_conversation_db()
         ScriptureGate.init_scripture_db()
     else:
-        print("[Cathedral] DATABASE_URL not set - conversation/scripture DB disabled")
+        _log.warning("DATABASE_URL not set - conversation/scripture DB disabled")
 
     MemoryGate.initialize()
     PersonalityGate.initialize()
@@ -41,9 +45,9 @@ async def startup(emit_event):
         await start_discovery()
         # Wire discovery to Loom message flow
         loom.enable_discovery(queue_message_discovery)
-        print("[Cathedral] Knowledge Discovery service started")
+        _log.info("Knowledge Discovery service started")
     except Exception as e:
-        print(f"[Cathedral] Knowledge Discovery failed to start: {e}")
+        _log.error(f"Knowledge Discovery failed to start: {e}")
 
     # Start BrowserGate WebSocket server for browser extension
     try:
@@ -78,9 +82,9 @@ async def startup(emit_event):
         server.handler.on_store_scripture = handle_store_scripture
         server.handler.on_search_memory = handle_search_memory
 
-        print(f"[Cathedral] BrowserGate WebSocket server started on ws://localhost:{server.port}")
+        _log.info(f"BrowserGate WebSocket server started on ws://localhost:{server.port}")
     except Exception as e:
-        print(f"[Cathedral] BrowserGate WebSocket server failed to start: {e}")
+        _log.error(f"BrowserGate WebSocket server failed to start: {e}")
 
 
 async def shutdown():
@@ -89,17 +93,17 @@ async def shutdown():
     try:
         loom.disable_discovery()
         await stop_discovery()
-        print("[Cathedral] Knowledge Discovery service stopped")
+        _log.info("Knowledge Discovery service stopped")
     except Exception as e:
-        print(f"[Cathedral] Knowledge Discovery shutdown error: {e}")
+        _log.error(f"Knowledge Discovery shutdown error: {e}")
 
     # Stop BrowserGate WebSocket server
     try:
         from cathedral.BrowserGate import stop_extension_server
         await stop_extension_server()
-        print("[Cathedral] BrowserGate WebSocket server stopped")
+        _log.info("BrowserGate WebSocket server stopped")
     except Exception as e:
-        print(f"[Cathedral] BrowserGate shutdown error: {e}")
+        _log.error(f"BrowserGate shutdown error: {e}")
 
 
 __all__ = ["startup", "shutdown"]

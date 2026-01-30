@@ -6,9 +6,93 @@ Aggregates health status from all Cathedral Gates.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter
+
+
+# Gate registry: name -> (module_path, class_name, health_method)
+# health_method is optional - defaults to "get_health_status"
+GATE_REGISTRY: Dict[str, Tuple[str, str, Optional[str]]] = {
+    "FileSystemGate": ("cathedral", "FileSystemGate", None),
+    "ShellGate": ("cathedral", "ShellGate", None),
+    "PersonalityGate": ("cathedral.PersonalityGate", "PersonalityManager", None),
+    "BrowserGate": ("cathedral", "BrowserGate", None),
+    "MemoryGate": ("cathedral", "MemoryGate", None),
+    "ScriptureGate": ("cathedral", "ScriptureGate", None),
+}
+
+
+def _get_gate_health(
+    module_path: str,
+    class_name: str,
+    health_method: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Get health status from a gate module.
+
+    Args:
+        module_path: Python module path (e.g., "cathedral" or "cathedral.PersonalityGate")
+        class_name: Class or module attribute name
+        health_method: Method name to call (defaults to "get_health_status")
+
+    Returns:
+        Health status dict
+    """
+    import importlib
+
+    method_name = health_method or "get_health_status"
+
+    module = importlib.import_module(module_path)
+    gate = getattr(module, class_name)
+
+    if hasattr(gate, method_name):
+        return getattr(gate, method_name)()
+    else:
+        return {"healthy": False, "error": f"No {method_name} method"}
+
+
+def _get_security_manager_health() -> Dict[str, Any]:
+    """
+    Get SecurityManager health status.
+
+    SecurityManager is special - it's always "available" if crypto deps are present,
+    but encryption may or may not be enabled/unlocked.
+    """
+    from cathedral import SecurityManager
+
+    # Check if crypto dependencies are available
+    try:
+        crypto_available = SecurityManager.is_available()
+    except AttributeError:
+        # Fallback: if is_available doesn't exist, check if we can import crypto
+        try:
+            import argon2
+            import cryptography
+            crypto_available = True
+        except ImportError:
+            crypto_available = False
+
+    encryption_enabled = False
+    unlocked = None
+
+    try:
+        encryption_enabled = SecurityManager.is_encryption_enabled()
+        if encryption_enabled:
+            unlocked = SecurityManager.is_unlocked()
+    except Exception:
+        pass
+
+    return {
+        "gate": "SecurityManager",
+        "healthy": crypto_available,  # Healthy if crypto deps available
+        "initialized": True,  # Module is always initialized
+        "details": {
+            "crypto_available": crypto_available,
+            "encryption_enabled": encryption_enabled,
+            "unlocked": unlocked,
+        },
+    }
 
 
 def create_router() -> APIRouter:
@@ -22,83 +106,24 @@ def create_router() -> APIRouter:
         Returns:
             Dict with overall health and per-gate status
         """
-        from cathedral import (
-            BrowserGate,
-            FileSystemGate,
-            PersonalityGate,
-            ShellGate,
-        )
-        from cathedral import MemoryGate
-        from cathedral import ScriptureGate
-        from cathedral import SecurityManager
-
         gates = {}
         all_healthy = True
 
-        # FileSystemGate
-        try:
-            gates["FileSystemGate"] = FileSystemGate.get_health_status()
-            if not gates["FileSystemGate"].get("healthy", False):
+        # Check all registered gates
+        for gate_name, (module_path, class_name, health_method) in GATE_REGISTRY.items():
+            try:
+                gates[gate_name] = _get_gate_health(module_path, class_name, health_method)
+                if not gates[gate_name].get("healthy", False):
+                    all_healthy = False
+            except Exception as e:
+                gates[gate_name] = {"healthy": False, "error": str(e)}
                 all_healthy = False
-        except Exception as e:
-            gates["FileSystemGate"] = {"healthy": False, "error": str(e)}
-            all_healthy = False
 
-        # ShellGate
+        # SecurityManager (special handling)
         try:
-            gates["ShellGate"] = ShellGate.get_health_status()
-            if not gates["ShellGate"].get("healthy", False):
+            gates["SecurityManager"] = _get_security_manager_health()
+            if not gates["SecurityManager"].get("healthy", False):
                 all_healthy = False
-        except Exception as e:
-            gates["ShellGate"] = {"healthy": False, "error": str(e)}
-            all_healthy = False
-
-        # PersonalityGate
-        try:
-            from cathedral.PersonalityGate import PersonalityManager
-            gates["PersonalityGate"] = PersonalityManager.get_health_status()
-            if not gates["PersonalityGate"].get("healthy", False):
-                all_healthy = False
-        except Exception as e:
-            gates["PersonalityGate"] = {"healthy": False, "error": str(e)}
-            all_healthy = False
-
-        # BrowserGate
-        try:
-            gates["BrowserGate"] = BrowserGate.get_health_status()
-            if not gates["BrowserGate"].get("healthy", False):
-                all_healthy = False
-        except Exception as e:
-            gates["BrowserGate"] = {"healthy": False, "error": str(e)}
-            all_healthy = False
-
-        # MemoryGate
-        try:
-            gates["MemoryGate"] = MemoryGate.get_health_status()
-            if not gates["MemoryGate"].get("healthy", False):
-                all_healthy = False
-        except Exception as e:
-            gates["MemoryGate"] = {"healthy": False, "error": str(e)}
-            all_healthy = False
-
-        # ScriptureGate
-        try:
-            gates["ScriptureGate"] = ScriptureGate.get_health_status()
-            if not gates["ScriptureGate"].get("healthy", False):
-                all_healthy = False
-        except Exception as e:
-            gates["ScriptureGate"] = {"healthy": False, "error": str(e)}
-            all_healthy = False
-
-        # SecurityManager
-        try:
-            gates["SecurityManager"] = {
-                "gate": "SecurityManager",
-                "healthy": True,
-                "initialized": SecurityManager.is_encryption_enabled() or True,
-                "encryption_enabled": SecurityManager.is_encryption_enabled(),
-                "unlocked": SecurityManager.is_unlocked() if SecurityManager.is_encryption_enabled() else None,
-            }
         except Exception as e:
             gates["SecurityManager"] = {"healthy": False, "error": str(e)}
             all_healthy = False
@@ -119,35 +144,28 @@ def create_router() -> APIRouter:
         Returns:
             Health status for the specified gate
         """
-        gate_map = {
-            "filesystemgate": ("cathedral", "FileSystemGate"),
-            "shellgate": ("cathedral", "ShellGate"),
-            "personalitygate": ("cathedral.PersonalityGate", "PersonalityManager"),
-            "browsergate": ("cathedral", "BrowserGate"),
-            "memorygate": ("cathedral", "MemoryGate"),
-            "scripturegate": ("cathedral", "ScriptureGate"),
+        # Normalize gate name for lookup
+        normalized = gate_name.lower()
+
+        # Check registered gates
+        for name, (module_path, class_name, health_method) in GATE_REGISTRY.items():
+            if name.lower() == normalized:
+                try:
+                    return _get_gate_health(module_path, class_name, health_method)
+                except Exception as e:
+                    return {"healthy": False, "error": str(e)}
+
+        # Check SecurityManager
+        if normalized == "securitymanager":
+            try:
+                return _get_security_manager_health()
+            except Exception as e:
+                return {"healthy": False, "error": str(e)}
+
+        return {
+            "error": f"Unknown gate: {gate_name}",
+            "available": list(GATE_REGISTRY.keys()) + ["SecurityManager"],
         }
-
-        key = gate_name.lower()
-        if key not in gate_map:
-            return {
-                "error": f"Unknown gate: {gate_name}",
-                "available": list(gate_map.keys()),
-            }
-
-        module_name, class_name = gate_map[key]
-
-        try:
-            import importlib
-            module = importlib.import_module(module_name)
-            gate_class = getattr(module, class_name)
-
-            if hasattr(gate_class, "get_health_status"):
-                return gate_class.get_health_status()
-            else:
-                return {"error": f"{gate_name} does not have health check methods"}
-        except Exception as e:
-            return {"healthy": False, "error": str(e)}
 
     @router.get("/api/health/summary")
     async def api_health_summary() -> Dict[str, Any]:
@@ -168,4 +186,4 @@ def create_router() -> APIRouter:
     return router
 
 
-__all__ = ["create_router"]
+__all__ = ["create_router", "GATE_REGISTRY"]
