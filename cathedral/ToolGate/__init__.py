@@ -95,6 +95,16 @@ from cathedral.ToolGate.prompt import (
     build_minimal_tool_prompt,
     build_tool_prompt,
     get_tool_count,
+    get_prompt_config,
+    set_custom_prompt,
+    restore_default_prompt,
+    get_prompt_version,
+    get_edit_warning,
+    ToolPromptManager,
+    DEFAULT_TOOL_PROTOCOL_PROMPT,
+    PROMPT_VERSION,
+    validate_prompt,
+    is_prompt_functional,
 )
 
 _log = GateLogger.get("ToolGate")
@@ -144,6 +154,10 @@ def get_health_status() -> dict:
     """Get detailed health status."""
     tool_count = len(ToolRegistry.list_tools()) if _initialized else 0
 
+    # Get prompt status
+    ToolPromptManager.initialize()
+    prompt_config = ToolPromptManager.get_config()
+
     return build_health_status(
         gate_name="ToolGate",
         initialized=_initialized,
@@ -151,10 +165,14 @@ def get_health_status() -> dict:
         checks={
             "registry_loaded": _initialized,
             "tools_available": tool_count > 0,
+            "prompt_functional": not prompt_config.get("is_using_fallback", False),
         },
         details={
             "tool_count": tool_count,
             "enabled_policies": [p.value for p in get_policy_manager().get_enabled_policies()],
+            "prompt_version": PROMPT_VERSION,
+            "prompt_is_custom": prompt_config.get("is_custom", False),
+            "prompt_using_fallback": prompt_config.get("is_using_fallback", False),
         },
     )
 
@@ -265,4 +283,15 @@ __all__ = [
     "build_tool_prompt",
     "build_minimal_tool_prompt",
     "get_tool_count",
+    # Prompt Configuration
+    "get_prompt_config",
+    "set_custom_prompt",
+    "restore_default_prompt",
+    "get_prompt_version",
+    "get_edit_warning",
+    "ToolPromptManager",
+    "DEFAULT_TOOL_PROTOCOL_PROMPT",
+    "PROMPT_VERSION",
+    "validate_prompt",
+    "is_prompt_functional",
 ]

@@ -2,6 +2,11 @@
 ToolGate Prompt Builder.
 
 Generates system prompt sections for tool instructions.
+
+The tool protocol prompt is configurable but protected:
+- Default prompt is versioned and validated
+- Custom prompts require explicit risk acknowledgment
+- Broken prompts fall back to default safely
 """
 
 from __future__ import annotations
@@ -10,61 +15,14 @@ from typing import Optional, Set
 
 from cathedral.ToolGate.models import PolicyClass
 from cathedral.ToolGate.registry import ToolRegistry
-
-
-# =============================================================================
-# Prompt Templates
-# =============================================================================
-
-TOOL_PROMPT_HEADER = """## Available Tools
-
-You have access to tools that extend your capabilities. When you need to use a tool, output a JSON object in your response.
-
-### Tool Call Format
-
-For a single tool call:
-```json
-{{"type": "tool_call", "id": "tc_<unique_id>", "tool": "<GateName>.<method>", "args": {{...}}}}
-```
-
-For multiple tool calls:
-```json
-{{"type": "tool_calls", "calls": [
-  {{"type": "tool_call", "id": "tc_1", "tool": "...", "args": {{...}}}},
-  {{"type": "tool_call", "id": "tc_2", "tool": "...", "args": {{...}}}}
-]}}
-```
-
-### Important Guidelines
-
-1. **Use tools only when needed** - Don't call tools for information you already have
-2. **Provide complete arguments** - Include all required arguments
-3. **Unique IDs** - Each call needs a unique id (e.g., tc_abc, tc_123)
-4. **Handle errors gracefully** - If a tool fails, acknowledge and adapt
-5. **Maximum {max_calls} calls per response** - Batch related calls together
-6. **Wait for results** - After emitting tool calls, results will be provided before you continue
-
-### Tool Results
-
-Results are provided in this format:
-```
-[TOOL RESULTS]
-Tool tc_1: SUCCESS
-Result: {{...}}
-
-Tool tc_2: FAILED
-Error: <reason>
-[/TOOL RESULTS]
-```
-
-Continue your response after receiving results.
-"""
-
-TOOL_PROMPT_FOOTER = """
----
-
-When not using tools, respond normally with text.
-"""
+from cathedral.ToolGate.prompt_config import (
+    ToolPromptManager,
+    DEFAULT_TOOL_PROTOCOL_PROMPT,
+    PROMPT_VERSION,
+    validate_prompt,
+    is_prompt_functional,
+    EDIT_WARNING,
+)
 
 
 # =============================================================================
@@ -76,14 +34,18 @@ def build_tool_prompt(
     enabled_policies: Optional[Set[PolicyClass]] = None,
     max_calls: int = 5,
     include_schemas: bool = True,
+    use_custom_prompt: bool = True,
 ) -> str:
     """
     Build the system prompt section for tool usage.
+
+    Combines the configurable tool protocol prompt with the tool schema reference.
 
     Args:
         enabled_policies: Set of enabled policy classes
         max_calls: Maximum tool calls per response
         include_schemas: Whether to include full tool schemas
+        use_custom_prompt: Whether to use custom prompt (if configured)
 
     Returns:
         System prompt section for tool instructions
@@ -91,14 +53,18 @@ def build_tool_prompt(
     if enabled_policies is None:
         enabled_policies = {PolicyClass.READ_ONLY}
 
-    # Initialize registry
+    # Initialize registry and prompt manager
     ToolRegistry.initialize()
+    ToolPromptManager.initialize()
 
-    # Build header with max_calls
-    header = TOOL_PROMPT_HEADER.format(max_calls=max_calls)
+    # Get the protocol prompt (configurable)
+    if use_custom_prompt:
+        protocol_prompt = ToolPromptManager.get_prompt()
+    else:
+        protocol_prompt = DEFAULT_TOOL_PROTOCOL_PROMPT
 
-    # Build tool reference
-    sections = [header, "### Available Tools\n"]
+    # Build tool reference section
+    sections = [protocol_prompt, "\n### Available Tools\n"]
 
     if include_schemas:
         # Full schemas
@@ -116,7 +82,8 @@ def build_tool_prompt(
         else:
             sections.append("*No tools available with current permissions.*")
 
-    sections.append(TOOL_PROMPT_FOOTER)
+    # Add max calls note
+    sections.append(f"\n*Maximum {max_calls} tool calls per response.*")
 
     return "\n".join(sections)
 
@@ -165,8 +132,65 @@ def get_tool_count(enabled_policies: Optional[Set[PolicyClass]] = None) -> int:
     return len(ToolRegistry.list_tools(enabled_policies))
 
 
+# =============================================================================
+# Prompt Configuration API
+# =============================================================================
+
+
+def get_prompt_config() -> dict:
+    """Get the current prompt configuration."""
+    ToolPromptManager.initialize()
+    return ToolPromptManager.get_config()
+
+
+def set_custom_prompt(prompt: str, acknowledge_risk: bool = False) -> tuple[bool, str]:
+    """
+    Set a custom tool protocol prompt.
+
+    WARNING: Breaking this prompt will disable tool calling.
+
+    Args:
+        prompt: The new prompt content
+        acknowledge_risk: Must be True to proceed
+
+    Returns:
+        Tuple of (success, message)
+    """
+    ToolPromptManager.initialize()
+    return ToolPromptManager.set_custom_prompt(prompt, acknowledge_risk)
+
+
+def restore_default_prompt() -> tuple[bool, str]:
+    """Restore the default tool protocol prompt."""
+    ToolPromptManager.initialize()
+    return ToolPromptManager.restore_default()
+
+
+def get_prompt_version() -> str:
+    """Get the current prompt version."""
+    return PROMPT_VERSION
+
+
+def get_edit_warning() -> str:
+    """Get the warning message for editing the prompt."""
+    return EDIT_WARNING
+
+
 __all__ = [
+    # Prompt building
     "build_tool_prompt",
     "build_minimal_tool_prompt",
     "get_tool_count",
+    # Prompt configuration
+    "get_prompt_config",
+    "set_custom_prompt",
+    "restore_default_prompt",
+    "get_prompt_version",
+    "get_edit_warning",
+    # Re-exports from prompt_config
+    "ToolPromptManager",
+    "DEFAULT_TOOL_PROTOCOL_PROMPT",
+    "PROMPT_VERSION",
+    "validate_prompt",
+    "is_prompt_functional",
 ]

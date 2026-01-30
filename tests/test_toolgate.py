@@ -406,3 +406,142 @@ class TestPublicAPI:
 
         assert tool is not None
         assert tool.name == "MemoryGate.search"
+
+
+class TestPromptConfiguration:
+    """Tests for prompt configuration system."""
+
+    def test_get_prompt_config(self):
+        """Should return prompt configuration."""
+        from cathedral.ToolGate import get_prompt_config
+
+        config = get_prompt_config()
+
+        assert "prompt" in config
+        assert "is_custom" in config
+        assert "current_version" in config
+        assert "is_using_fallback" in config
+
+    def test_get_prompt_version(self):
+        """Should return prompt version."""
+        from cathedral.ToolGate import get_prompt_version, PROMPT_VERSION
+
+        version = get_prompt_version()
+        assert version == PROMPT_VERSION
+        assert "." in version  # Semver-ish
+
+    def test_validate_prompt_valid(self):
+        """Should validate a valid prompt."""
+        from cathedral.ToolGate import validate_prompt, DEFAULT_TOOL_PROTOCOL_PROMPT
+
+        valid, missing = validate_prompt(DEFAULT_TOOL_PROTOCOL_PROMPT)
+
+        assert valid is True
+        assert len(missing) == 0
+
+    def test_validate_prompt_invalid(self):
+        """Should detect missing markers in invalid prompt."""
+        from cathedral.ToolGate import validate_prompt
+
+        # Missing required markers
+        invalid_prompt = "Just a regular prompt without tool instructions."
+
+        valid, missing = validate_prompt(invalid_prompt)
+
+        assert valid is False
+        assert len(missing) > 0
+        assert '"type"' in missing
+
+    def test_is_prompt_functional(self):
+        """Should check if prompt is functional."""
+        from cathedral.ToolGate import is_prompt_functional, DEFAULT_TOOL_PROTOCOL_PROMPT
+
+        assert is_prompt_functional(DEFAULT_TOOL_PROTOCOL_PROMPT) is True
+        assert is_prompt_functional("broken prompt") is False
+
+    def test_set_custom_prompt_requires_acknowledgment(self):
+        """Should require risk acknowledgment."""
+        from cathedral.ToolGate import set_custom_prompt, restore_default_prompt
+
+        # Reset to known state
+        restore_default_prompt()
+
+        # Try without acknowledgment
+        success, message = set_custom_prompt("new prompt", acknowledge_risk=False)
+
+        assert success is False
+        assert "acknowledge" in message.lower()
+
+    def test_set_custom_prompt_validates(self):
+        """Should validate prompt before saving."""
+        from cathedral.ToolGate import set_custom_prompt, restore_default_prompt
+
+        # Reset to known state
+        restore_default_prompt()
+
+        # Try with invalid prompt (missing markers)
+        success, message = set_custom_prompt(
+            "This prompt has no tool markers.",
+            acknowledge_risk=True
+        )
+
+        assert success is False
+        assert "missing" in message.lower()
+
+    def test_set_and_restore_custom_prompt(self):
+        """Should set custom prompt and restore default."""
+        from cathedral.ToolGate import (
+            set_custom_prompt,
+            restore_default_prompt,
+            get_prompt_config,
+            DEFAULT_TOOL_PROTOCOL_PROMPT,
+        )
+
+        # Reset first
+        restore_default_prompt()
+
+        # Create a valid custom prompt
+        custom_prompt = DEFAULT_TOOL_PROTOCOL_PROMPT + "\n\n## Custom Section\nThis is custom."
+
+        success, message = set_custom_prompt(custom_prompt, acknowledge_risk=True)
+
+        assert success is True
+
+        config = get_prompt_config()
+        assert config["is_custom"] is True
+        assert "Custom Section" in config["prompt"]
+
+        # Restore default
+        success, message = restore_default_prompt()
+
+        assert success is True
+
+        config = get_prompt_config()
+        assert config["is_custom"] is False
+        assert "Custom Section" not in config["prompt"]
+
+    def test_get_edit_warning(self):
+        """Should return warning message."""
+        from cathedral.ToolGate import get_edit_warning
+
+        warning = get_edit_warning()
+
+        assert "WARNING" in warning
+        assert "break" in warning.lower() or "risk" in warning.lower()
+
+    def test_default_prompt_has_required_elements(self):
+        """Default prompt should have all required elements."""
+        from cathedral.ToolGate import DEFAULT_TOOL_PROTOCOL_PROMPT
+
+        # Must have JSON format examples
+        assert '"type"' in DEFAULT_TOOL_PROTOCOL_PROMPT
+        assert '"tool_call"' in DEFAULT_TOOL_PROTOCOL_PROMPT
+        assert '"id"' in DEFAULT_TOOL_PROTOCOL_PROMPT
+        assert '"tool"' in DEFAULT_TOOL_PROTOCOL_PROMPT
+        assert '"args"' in DEFAULT_TOOL_PROTOCOL_PROMPT
+
+        # Must have result format
+        assert "TOOL RESULTS" in DEFAULT_TOOL_PROTOCOL_PROMPT
+
+        # Should explain when to use tools
+        assert "when" in DEFAULT_TOOL_PROTOCOL_PROMPT.lower()
