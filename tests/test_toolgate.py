@@ -535,13 +535,17 @@ class TestPromptConfiguration:
 
         # Must have JSON format examples
         assert '"type"' in DEFAULT_TOOL_PROTOCOL_PROMPT
-        assert '"tool_call"' in DEFAULT_TOOL_PROTOCOL_PROMPT
+        assert "tool_call" in DEFAULT_TOOL_PROTOCOL_PROMPT
         assert '"id"' in DEFAULT_TOOL_PROTOCOL_PROMPT
         assert '"tool"' in DEFAULT_TOOL_PROTOCOL_PROMPT
         assert '"args"' in DEFAULT_TOOL_PROTOCOL_PROMPT
 
-        # Must have result format
-        assert "TOOL RESULTS" in DEFAULT_TOOL_PROTOCOL_PROMPT
+        # Must mention tool_result for response handling
+        assert "tool_result" in DEFAULT_TOOL_PROTOCOL_PROMPT
 
-        # Should explain when to use tools
-        assert "when" in DEFAULT_TOOL_PROTOCOL_PROMPT.lower()
+        # Should have clear rules
+        assert "MUST" in DEFAULT_TOOL_PROTOCOL_PROMPT
+        assert "JSON" in DEFAULT_TOOL_PROTOCOL_PROMPT
+
+        # Should explain normal responses
+        assert "normal" in DEFAULT_TOOL_PROTOCOL_PROMPT.lower()
