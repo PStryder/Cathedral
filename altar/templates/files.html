@@ -306,23 +306,29 @@
                 return;
             }
 
-            container.innerHTML = files.map(f => {
+            container.innerHTML = '';
+            files.forEach((f, idx) => {
                 const icon = f.is_directory ? '&#128193;' : '&#128196;';
                 const size = f.is_directory ? '' : formatBytes(f.size_bytes);
-                const clickAction = f.is_directory
-                    ? `navigateTo('${escapeHtml(f.path)}')`
-                    : `viewFile('${escapeHtml(f.path)}')`;
 
-                return `
-                    <div class="file-row" onclick="${clickAction}">
-                        <div class="flex items-center">
-                            <span class="file-icon">${icon}</span>
-                            <span>${escapeHtml(f.name)}</span>
-                        </div>
-                        <span class="text-gray-500 text-sm">${size}</span>
+                const row = document.createElement('div');
+                row.className = 'file-row';
+                row.innerHTML = `
+                    <div class="flex items-center">
+                        <span class="file-icon">${icon}</span>
+                        <span>${escapeHtml(f.name)}</span>
                     </div>
+                    <span class="text-gray-500 text-sm">${size}</span>
                 `;
-            }).join('');
+                row.onclick = () => {
+                    if (f.is_directory) {
+                        navigateTo(f.path);
+                    } else {
+                        viewFile(f.path);
+                    }
+                };
+                container.appendChild(row);
+            });
         }
 
         function updateBreadcrumb() {
@@ -333,20 +339,38 @@
             }
 
             container.classList.remove('hidden');
+            container.innerHTML = '';
+
             const parts = currentPath.split(/[\/\\]/).filter(Boolean);
-            let path = '';
-            const crumbs = [`<span class="cursor-pointer hover:text-purple-400" onclick="navigateTo('')">Root</span>`];
+            let accumulatedPath = '';
+
+            // Root crumb
+            const rootSpan = document.createElement('span');
+            rootSpan.className = 'cursor-pointer hover:text-purple-400';
+            rootSpan.textContent = 'Root';
+            rootSpan.onclick = () => navigateTo('');
+            container.appendChild(rootSpan);
 
             parts.forEach((part, i) => {
-                path += (i === 0 ? '' : '/') + part;
-                if (i === parts.length - 1) {
-                    crumbs.push(`<span class="text-gray-300">${escapeHtml(part)}</span>`);
-                } else {
-                    crumbs.push(`<span class="cursor-pointer hover:text-purple-400" onclick="navigateTo('${escapeHtml(path)}')">${escapeHtml(part)}</span>`);
-                }
-            });
+                accumulatedPath += (i === 0 ? '' : '/') + part;
 
-            container.innerHTML = crumbs.join(' / ');
+                // Separator
+                container.appendChild(document.createTextNode(' / '));
+
+                const span = document.createElement('span');
+                if (i === parts.length - 1) {
+                    // Current (non-clickable)
+                    span.className = 'text-gray-300';
+                    span.textContent = part;
+                } else {
+                    // Clickable parent
+                    span.className = 'cursor-pointer hover:text-purple-400';
+                    span.textContent = part;
+                    const pathCopy = accumulatedPath; // Capture for closure
+                    span.onclick = () => navigateTo(pathCopy);
+                }
+                container.appendChild(span);
+            });
         }
 
         function navigateTo(path) {

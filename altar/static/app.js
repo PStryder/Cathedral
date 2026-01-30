@@ -9,6 +9,11 @@ const state = {
     maxConsoleLines: 200
 };
 
+// Event source and connection state
+let eventSource = null;
+let sseConnected = false;
+let lastPollTimestamp = 0;
+
 // DOM Elements
 const elements = {
     threadList: document.getElementById('threadList'),
@@ -406,8 +411,6 @@ window.clearConsole = clearConsole;
 
 // ========== Event Source for System Events ==========
 
-let eventSource = null;
-
 function connectEventSource() {
     // Connect to server-sent events for system notifications
     if (eventSource) {
@@ -454,10 +457,6 @@ function connectEventSource() {
     // Ignore ping events (keepalive)
     eventSource.addEventListener('ping', () => {});
 }
-
-// Track last poll time for efficient polling
-let lastPollTimestamp = 0;
-let sseConnected = false;
 
 // Poll for agent status updates (fallback if SSE not available)
 async function pollAgentStatus() {

@@ -1,0 +1,70 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv
+ENV
+env
+.eggs
+*.egg-info
+*.egg
+dist
+build
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache
+.coverage
+htmlcov
+.tox
+.nox
+
+# Local data (will be mounted as volumes)
+data/
+models/
+*.db
+*.sqlite
+
+# Environment files (secrets)
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Documentation build
+docs/_build
+
+# Misc
+*.zip
+*.tar.gz
+*.bak
+*.tmp
+
+# Large vendored dependencies (if any)
+llama-cpp-python/
+library/
+vectors/
+
+# Local development
+altar-ui/
+scripts/*.local.*

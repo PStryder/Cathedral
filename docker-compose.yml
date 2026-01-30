@@ -1,0 +1,97 @@
+# Cathedral Docker Compose
+# Complete stack with PostgreSQL + pgvector
+
+version: '3.8'
+
+services:
+  # ============================================
+  # PostgreSQL with pgvector
+  # ============================================
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: cathedral-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cathedral}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cathedral_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-cathedral}
+    volumes:
+      - cathedral_pgdata:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cathedral} -d ${POSTGRES_DB:-cathedral}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cathedral-net
+
+  # ============================================
+  # Cathedral Application
+  # ============================================
+  cathedral:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cathedral-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Database
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cathedral}:${POSTGRES_PASSWORD:-cathedral_secret}@db:5432/${POSTGRES_DB:-cathedral}
+      DB_BACKEND: postgres
+      VECTOR_BACKEND: pgvector
+      AUTO_MIGRATE_ON_STARTUP: "true"
+      AUTO_CREATE_EXTENSIONS: "true"
+
+      # API Keys (set in .env file)
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+
+      # Server
+      HOST: "0.0.0.0"
+      PORT: "8000"
+      DEBUG: ${DEBUG:-false}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
+
+      # Models
+      DEFAULT_MODEL: ${DEFAULT_MODEL:-openai/gpt-4o}
+      VISION_MODEL: ${VISION_MODEL:-openai/gpt-4o}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+
+      # Features
+      ENABLE_MEMORY_GATE: ${ENABLE_MEMORY_GATE:-true}
+      ENABLE_SCRIPTURE_RAG: ${ENABLE_SCRIPTURE_RAG:-true}
+      ENABLE_SUBAGENTS: ${ENABLE_SUBAGENTS:-true}
+      ENABLE_MULTIMODAL: ${ENABLE_MULTIMODAL:-true}
+      AUTO_EXTRACT_MEMORY: ${AUTO_EXTRACT_MEMORY:-true}
+    volumes:
+      - cathedral_data:/app/data
+      - cathedral_models:/app/models
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    networks:
+      - cathedral-net
+
+# ============================================
+# Volumes
+# ============================================
+volumes:
+  cathedral_pgdata:
+    driver: local
+  cathedral_data:
+    driver: local
+  cathedral_models:
+    driver: local
+
+# ============================================
+# Networks
+# ============================================
+networks:
+  cathedral-net:
+    driver: bridge

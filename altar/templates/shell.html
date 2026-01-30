@@ -278,15 +278,20 @@
                     return;
                 }
 
-                container.innerHTML = running.map(r => `
-                    <div class="bg-gray-700/50 rounded p-2 text-sm">
+                container.innerHTML = '';
+                running.forEach(r => {
+                    const item = document.createElement('div');
+                    item.className = 'bg-gray-700/50 rounded p-2 text-sm';
+                    item.innerHTML = `
                         <div class="flex items-center justify-between">
-                            <span class="font-mono text-xs">${r.id}</span>
-                            <button onclick="cancelCommand('${r.id}')" class="btn btn-danger btn-sm">Cancel</button>
+                            <span class="font-mono text-xs">${escapeHtml(r.id)}</span>
+                            <button class="btn btn-danger btn-sm">Cancel</button>
                         </div>
                         <div class="text-gray-400 text-xs mt-1 truncate">${escapeHtml(r.command)}</div>
-                    </div>
-                `).join('');
+                    `;
+                    item.querySelector('button').onclick = () => cancelCommand(r.id);
+                    container.appendChild(item);
+                });
             } catch (e) {
                 console.error('Error loading running:', e);
             }
@@ -319,20 +324,23 @@
                     return;
                 }
 
-                container.innerHTML = history.map(h => {
+                container.innerHTML = '';
+                history.forEach(h => {
                     const icon = h.success ? '&#10003;' : '&#10007;';
                     const iconClass = h.success ? 'text-green-400' : 'text-red-400';
 
-                    return `
-                        <div class="history-item" onclick="rerunCommand('${escapeHtml(h.command)}')">
-                            <div class="flex items-center gap-2">
-                                <span class="${iconClass}">${icon}</span>
-                                <span class="font-mono text-xs truncate">${escapeHtml(h.command)}</span>
-                            </div>
-                            <div class="text-gray-500 text-xs mt-1">${h.duration_seconds.toFixed(1)}s</div>
+                    const item = document.createElement('div');
+                    item.className = 'history-item';
+                    item.innerHTML = `
+                        <div class="flex items-center gap-2">
+                            <span class="${iconClass}">${icon}</span>
+                            <span class="font-mono text-xs truncate">${escapeHtml(h.command)}</span>
                         </div>
+                        <div class="text-gray-500 text-xs mt-1">${h.duration_seconds.toFixed(1)}s</div>
                     `;
-                }).join('');
+                    item.onclick = () => rerunCommand(h.command);
+                    container.appendChild(item);
+                });
             } catch (e) {
                 console.error('Error loading history:', e);
             }
