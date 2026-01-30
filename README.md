@@ -728,28 +728,62 @@ CMD ["python", "-m", "altar.run"]
 
 ### Reverse Proxy (nginx example)
 
+> **⚠️ SECURITY WARNING**
+>
+> **Do not expose Cathedral to the public internet without authentication and network restrictions.**
+>
+> Cathedral provides powerful system access (shell commands, file operations, tool execution).
+> Default deployment should be **LAN-only** or **VPN-only**.
+
+#### Recommended Deployment Modes (by security level)
+
+1. **VPN-only** (Tailscale/WireGuard) — simplest, strong security
+2. **Reverse proxy + SSO** (OAuth2 Proxy / Authelia / Keycloak) — enterprise
+3. **Mutual TLS (mTLS)** — for high-security environments
+4. **Basic Auth** — bare minimum; acceptable for home lab behind VPN
+
+#### Minimal Secure nginx Config
+
 ```nginx
 server {
-    listen 443 ssl;
+    listen 443 ssl http2;
     server_name cathedral.example.com;
 
-    ssl_certificate /path/to/cert.pem;
+    ssl_certificate     /path/to/cert.pem;
     ssl_certificate_key /path/to/key.pem;
+
+    # ⚠️ BASIC AUTH - minimum viable authentication
+    # Create with: htpasswd -c /etc/nginx/.htpasswd username
+    auth_basic "Cathedral";
+    auth_basic_user_file /etc/nginx/.htpasswd;
+
+    # Forward client identity
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
 
     location / {
         proxy_pass http://127.0.0.1:8000;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
 
-        # SSE support
+        # SSE support (required for streaming responses)
         proxy_buffering off;
         proxy_cache off;
+        proxy_read_timeout 1h;
+
+        # WebSocket support (if needed)
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
     }
 }
 ```
+
+#### Additional Hardening
+
+- **Lock down `ALLOWED_ORIGINS`** — Don't leave as `*` in production
+- **Restrict dangerous endpoints** — Consider IP-restricting ShellGate, ToolGate prompt editing, and security reset endpoints
+- **Use firewall rules** — Limit access to trusted networks even with auth enabled
 
 ---
 
@@ -812,15 +846,41 @@ pip install aiosqlite
 
 ## Security Considerations
 
-- **Local deployment only** - Cathedral is designed for local/private use
-- **Use strong passwords** - Argon2id is secure, but weak passwords aren't
-- **Review shell commands** - Check the ShellGate blocklist configuration
-- **Limit folder access** - Only grant `read_write` to necessary folders
-- **Protect API keys** - Use environment variables, not config files
-- **Network isolation** - Use firewall rules if exposed on network
-- **Regular backups** - Enable FileSystemGate auto-backup feature
-- **Tool policy control** - ToolGate defaults to READ_ONLY; explicitly enable WRITE/PRIVILEGED policies
-- **Tool prompt protection** - Custom tool prompts require explicit risk acknowledgment
+> **⚠️ Cathedral is designed for local/private deployment only.**
+>
+> It provides powerful system access including shell commands, file operations, and AI-driven tool execution. Never expose it to the public internet without proper authentication and network restrictions.
+
+### Network Security
+
+- **Default to LAN/VPN only** — Do not expose to public internet without authentication
+- **Use reverse proxy with auth** — Basic Auth minimum; SSO/OAuth2 preferred
+- **Lock down `ALLOWED_ORIGINS`** — Never use `*` in production
+- **Firewall rules** — Restrict access to trusted networks
+
+### Dangerous Endpoints
+
+These endpoints provide powerful system access and should be restricted:
+
+| Endpoint | Risk | Recommendation |
+|----------|------|----------------|
+| `/shell`, `/api/shell/*` | Command execution | IP-restrict or disable |
+| `/api/toolgate/prompt` | Can modify AI behavior | Require explicit auth |
+| `/api/security/reset` | Factory reset | IP-restrict to localhost |
+| `/api/files/*` (write) | File system modification | Limit folder permissions |
+
+### Application Security
+
+- **Use strong passwords** — Argon2id is secure, but weak passwords aren't
+- **Review shell blocklist** — Check ShellGate configuration for your environment
+- **Limit folder access** — Only grant `read_write` to necessary folders
+- **Protect API keys** — Use environment variables, not `.env` in production
+- **Regular backups** — Enable FileSystemGate auto-backup feature
+
+### Tool Calling (ToolGate) Security
+
+- **Default policy is READ_ONLY** — Explicitly enable WRITE/PRIVILEGED/DESTRUCTIVE
+- **Custom prompts require acknowledgment** — Prevents accidental misconfiguration
+- **Bounded execution** — Max iterations and call limits prevent runaway loops
 
 ---
 
