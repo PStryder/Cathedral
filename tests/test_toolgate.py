@@ -549,3 +549,42 @@ class TestPromptConfiguration:
 
         # Should explain normal responses
         assert "normal" in DEFAULT_TOOL_PROTOCOL_PROMPT.lower()
+
+    def test_json_correction_message(self):
+        """Should have JSON correction message for malformed tool calls."""
+        from cathedral.ToolGate import get_json_correction_message, JSON_CORRECTION_MESSAGE
+
+        message = get_json_correction_message()
+
+        # Should be the constant
+        assert message == JSON_CORRECTION_MESSAGE
+
+        # Should include key instructions
+        assert "JSON" in message
+        assert "tool_call" in message
+        assert '"type"' in message
+        assert '"id"' in message
+        assert '"tool"' in message
+        assert '"args"' in message
+
+    def test_tool_call_example(self):
+        """Should have example tool call for prompt."""
+        from cathedral.ToolGate import TOOL_CALL_EXAMPLE
+
+        # Should be a valid example
+        assert "Example" in TOOL_CALL_EXAMPLE
+        assert "tool_call" in TOOL_CALL_EXAMPLE
+        assert "MemoryGate.search" in TOOL_CALL_EXAMPLE
+        assert '"query"' in TOOL_CALL_EXAMPLE
+
+    def test_build_tool_prompt_includes_example(self):
+        """Should include example when requested."""
+        from cathedral.ToolGate import build_tool_prompt, TOOL_CALL_EXAMPLE
+
+        # With example (default)
+        prompt_with = build_tool_prompt(include_example=True)
+        assert "Example" in prompt_with
+
+        # Without example
+        prompt_without = build_tool_prompt(include_example=False)
+        assert "Example" not in prompt_without or "## Example" not in prompt_without

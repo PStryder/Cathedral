@@ -26,6 +26,29 @@ from cathedral.ToolGate.prompt_config import (
 
 
 # =============================================================================
+# Example and Correction Messages
+# =============================================================================
+
+TOOL_CALL_EXAMPLE = """
+## Example
+
+If asked to search memory, you would respond with ONLY:
+{"type": "tool_call", "id": "tc_1", "tool": "MemoryGate.search", "args": {"query": "example", "limit": 5}}
+
+Then wait for the result before continuing.
+"""
+
+JSON_CORRECTION_MESSAGE = """Your previous response contained invalid JSON for a tool call.
+
+Please re-emit ONLY the valid JSON tool call, with no other text.
+
+Remember the format:
+{"type": "tool_call", "id": "<unique_id>", "tool": "<ToolName>", "args": {...}}
+
+Emit only the JSON, nothing else."""
+
+
+# =============================================================================
 # Prompt Building
 # =============================================================================
 
@@ -34,6 +57,7 @@ def build_tool_prompt(
     enabled_policies: Optional[Set[PolicyClass]] = None,
     max_calls: int = 5,
     include_schemas: bool = True,
+    include_example: bool = True,
     use_custom_prompt: bool = True,
 ) -> str:
     """
@@ -45,6 +69,7 @@ def build_tool_prompt(
         enabled_policies: Set of enabled policy classes
         max_calls: Maximum tool calls per response
         include_schemas: Whether to include full tool schemas
+        include_example: Whether to include example tool call
         use_custom_prompt: Whether to use custom prompt (if configured)
 
     Returns:
@@ -64,7 +89,13 @@ def build_tool_prompt(
         protocol_prompt = DEFAULT_TOOL_PROTOCOL_PROMPT
 
     # Build tool reference section
-    sections = [protocol_prompt, "\n### Available Tools\n"]
+    sections = [protocol_prompt]
+
+    # Add example if requested
+    if include_example:
+        sections.append(TOOL_CALL_EXAMPLE)
+
+    sections.append("\n### Available Tools\n")
 
     if include_schemas:
         # Full schemas
@@ -86,6 +117,11 @@ def build_tool_prompt(
     sections.append(f"\n*Maximum {max_calls} tool calls per response.*")
 
     return "\n".join(sections)
+
+
+def get_json_correction_message() -> str:
+    """Get the message to inject when model emits invalid JSON."""
+    return JSON_CORRECTION_MESSAGE
 
 
 def build_minimal_tool_prompt(enabled_policies: Optional[Set[PolicyClass]] = None) -> str:
@@ -181,6 +217,10 @@ __all__ = [
     "build_tool_prompt",
     "build_minimal_tool_prompt",
     "get_tool_count",
+    "get_json_correction_message",
+    # Example and correction messages
+    "TOOL_CALL_EXAMPLE",
+    "JSON_CORRECTION_MESSAGE",
     # Prompt configuration
     "get_prompt_config",
     "set_custom_prompt",

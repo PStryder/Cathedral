@@ -19,9 +19,11 @@ from cathedral.ToolGate.models import (
 from cathedral.ToolGate.policy import PolicyManager, get_policy_manager
 from cathedral.ToolGate.protocol import (
     format_tool_results,
+    is_tool_response,
     parse_tool_calls,
     validate_args,
 )
+from cathedral.ToolGate.prompt import get_json_correction_message
 from cathedral.ToolGate.registry import ToolRegistry
 
 _log = GateLogger.get("ToolGate")
@@ -215,8 +217,39 @@ class ToolOrchestrator:
             # Parse tool calls
             remaining_text, tool_calls = parse_tool_calls(current_response)
 
-            # If no tool calls, yield remaining text and exit
+            # If no tool calls, check if it was a malformed attempt
             if not tool_calls:
+                # Check if response looked like a tool call attempt but failed to parse
+                if is_tool_response(current_response):
+                    # Malformed JSON - inject correction message and retry
+                    await self._emit("tool", "Malformed tool call JSON, requesting correction")
+                    _log.warning("Model emitted malformed tool call JSON, requesting retry")
+
+                    # Add assistant's malformed response to history
+                    messages.append({
+                        "role": "assistant",
+                        "content": current_response,
+                    })
+
+                    # Inject correction message
+                    messages.append({
+                        "role": "user",
+                        "content": get_json_correction_message(),
+                    })
+
+                    # Get corrected response
+                    current_response = ""
+                    async for token in reflect_stream(
+                        messages,
+                        model=model,
+                        temperature=temperature,
+                    ):
+                        current_response += token
+
+                    # Continue loop to re-parse the corrected response
+                    continue
+
+                # Genuine non-tool response - yield and exit
                 if remaining_text:
                     yield remaining_text
                 break
