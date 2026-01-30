@@ -94,6 +94,9 @@ class MetadataChannel:
                 return False
 
         # Rate limiting check (simple token bucket)
+        # Note: Not thread-safe - in multi-worker FastAPI, each worker has its own
+        # rate bucket. Within a single worker with async concurrency, races are
+        # possible but non-critical (may slightly over/under count).
         rate_limit = getattr(self, '_rate_limit', None)
         if rate_limit:
             caller = context.get("caller", "default")

@@ -6,9 +6,9 @@ Aggregates health status from all Cathedral Gates.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 
 
 # Gate registry: name -> (module_path, class_name, health_method)
@@ -95,38 +95,60 @@ def _get_security_manager_health() -> Dict[str, Any]:
     }
 
 
+def _collect_health_data() -> Tuple[bool, Dict[str, Any]]:
+    """
+    Collect health data from all gates.
+
+    Returns:
+        Tuple of (all_healthy, gates_dict)
+    """
+    gates = {}
+    all_healthy = True
+
+    # Check all registered gates
+    for gate_name, (module_path, class_name, health_method) in GATE_REGISTRY.items():
+        try:
+            gates[gate_name] = _get_gate_health(module_path, class_name, health_method)
+            if not gates[gate_name].get("healthy", False):
+                all_healthy = False
+        except Exception as e:
+            gates[gate_name] = {"healthy": False, "error": str(e)}
+            all_healthy = False
+
+    # SecurityManager (special handling)
+    try:
+        gates["SecurityManager"] = _get_security_manager_health()
+        if not gates["SecurityManager"].get("healthy", False):
+            all_healthy = False
+    except Exception as e:
+        gates["SecurityManager"] = {"healthy": False, "error": str(e)}
+        all_healthy = False
+
+    return all_healthy, gates
+
+
 def create_router() -> APIRouter:
     router = APIRouter()
 
     @router.get("/api/health")
-    async def api_health() -> Dict[str, Any]:
+    async def api_health(response: Response) -> Dict[str, Any]:
         """
         Get aggregated health status from all Gates.
+
+        Returns 200 when healthy, 503 when unhealthy.
+
+        Health semantics:
+        - available: dependencies exist, can be imported, external services reachable
+        - initialized: gate has been set up in this process
+        - healthy: initialized + all checks pass
 
         Returns:
             Dict with overall health and per-gate status
         """
-        gates = {}
-        all_healthy = True
+        all_healthy, gates = _collect_health_data()
 
-        # Check all registered gates
-        for gate_name, (module_path, class_name, health_method) in GATE_REGISTRY.items():
-            try:
-                gates[gate_name] = _get_gate_health(module_path, class_name, health_method)
-                if not gates[gate_name].get("healthy", False):
-                    all_healthy = False
-            except Exception as e:
-                gates[gate_name] = {"healthy": False, "error": str(e)}
-                all_healthy = False
-
-        # SecurityManager (special handling)
-        try:
-            gates["SecurityManager"] = _get_security_manager_health()
-            if not gates["SecurityManager"].get("healthy", False):
-                all_healthy = False
-        except Exception as e:
-            gates["SecurityManager"] = {"healthy": False, "error": str(e)}
-            all_healthy = False
+        if not all_healthy:
+            response.status_code = 503
 
         return {
             "healthy": all_healthy,
@@ -168,18 +190,21 @@ def create_router() -> APIRouter:
         }
 
     @router.get("/api/health/summary")
-    async def api_health_summary() -> Dict[str, Any]:
+    async def api_health_summary(response: Response) -> Dict[str, Any]:
         """
         Get a quick health summary (just healthy/unhealthy per gate).
-        """
-        full_health = await api_health()
 
-        summary = {}
-        for gate_name, status in full_health.get("gates", {}).items():
-            summary[gate_name] = status.get("healthy", False)
+        Returns 200 when healthy, 503 when unhealthy.
+        """
+        all_healthy, gates = _collect_health_data()
+
+        summary = {name: status.get("healthy", False) for name, status in gates.items()}
+
+        if not all_healthy:
+            response.status_code = 503
 
         return {
-            "healthy": full_health.get("healthy", False),
+            "healthy": all_healthy,
             "gates": summary,
         }
 
