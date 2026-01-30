@@ -160,6 +160,8 @@ class SubAgentManager:
             json.dump(task_data, f)
 
         # Spawn subprocess
+        # Note: Use DEVNULL to avoid pipe deadlock. Results are written to files.
+        # If stderr is needed for debugging, the worker should write to a log file.
         try:
             env = os.environ.copy()
             env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2])
@@ -167,8 +169,8 @@ class SubAgentManager:
             process = subprocess.Popen(
                 [sys.executable, str(self._worker_script), agent_id],
                 env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 cwd=str(Path(__file__).resolve().parents[2])
             )
 
@@ -280,14 +282,9 @@ class SubAgentManager:
                 agent.status = AgentStatus.FAILED
                 agent.error = result.get("error", "Unknown error")
         else:
-            # No result file - check stderr
-            try:
-                _, stderr = agent.process.communicate(timeout=1)
-                agent.status = AgentStatus.FAILED
-                agent.error = stderr.decode()[:500] if stderr else f"Exit code {retcode}"
-            except Exception:
-                agent.status = AgentStatus.FAILED
-                agent.error = f"Process exited with code {retcode}"
+            # No result file - process failed before writing result
+            agent.status = AgentStatus.FAILED
+            agent.error = f"Process exited with code {retcode} (no result file)"
 
     def _check_all(self) -> None:
         """Check all running agents."""
