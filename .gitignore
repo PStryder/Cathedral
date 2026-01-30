@@ -91,3 +91,9 @@ altar-ui/.import/
 scratch/
 temp/
 *.tmp
+
+# Legacy/archived code (root level only)
+/legacy/
+
+# Vendored llama-cpp-python (local build)
+llama-cpp-python/

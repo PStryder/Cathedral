@@ -96,11 +96,6 @@ def disable_discovery():
     _discovery_queue_func = None
 
 
-def estimate_tokens(messages: List[Dict]) -> int:
-    """Estimate token count from messages (rough approximation)."""
-    return sum(len(m.get('content', '').split()) for m in messages)
-
-
 def truncate_to_fit(messages: List[Dict], token_limit: int) -> List[Dict]:
     """Truncate messages to fit within token limit, keeping most recent."""
     result = []

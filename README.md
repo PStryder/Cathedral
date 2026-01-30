@@ -62,6 +62,17 @@ Built with FastAPI, PostgreSQL + pgvector, and designed for local deployment.
 | **RAG Context** | Automatically inject relevant documents into prompts |
 | **Multiple Types** | Documents, images, audio, artifacts, threads |
 
+### Tool Calling (ToolGate)
+
+| Feature | Description |
+|---------|-------------|
+| **Provider-Agnostic** | JSON-in-text protocol works with any LLM |
+| **31 Tools** | Across 6 Gates: Memory, Files, Shell, Scripture, Browser, SubAgents |
+| **Policy Control** | 5 policy classes: READ_ONLY, WRITE, DESTRUCTIVE, PRIVILEGED, NETWORK |
+| **Bounded Execution** | Configurable limits (iterations, calls per step, total calls) |
+| **Configurable Prompt** | Versioned, editable system prompt with safe fallback |
+| **UI Integration** | Tools toggle, inline execution display, protocol editor |
+
 ### System Integration
 
 | Feature | Description |
@@ -243,6 +254,15 @@ Access the configuration UI at `/config` or use the REST API.
 | `ENABLE_MULTIMODAL` | Enable vision/audio | `true` |
 | `AUTO_EXTRACT_MEMORY` | Auto-extract from conversations | `true` |
 
+#### Tool Calling (ToolGate)
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `TOOL_PROTOCOL_PROMPT` | Custom tool protocol prompt | (built-in) |
+| `TOOL_MAX_ITERATIONS` | Max tool execution loop iterations | `6` |
+| `TOOL_MAX_CALLS_PER_STEP` | Max tool calls per iteration | `5` |
+| `TOOL_MAX_TOTAL_CALLS` | Max total calls per request | `20` |
+
 #### Paths
 
 | Setting | Description | Default |
@@ -260,7 +280,7 @@ Access the configuration UI at `/config` or use the REST API.
 
 The primary interface is the web UI at `http://localhost:8000/`:
 
-- **Chat** - Main conversation interface
+- **Chat** - Main conversation interface (with tools toggle)
 - **Config** (`/config`) - Configuration editor
 - **Memory** (`/memory`) - Memory browser
 - **Scripture** (`/scripture`) - Document library
@@ -269,6 +289,7 @@ The primary interface is the web UI at `http://localhost:8000/`:
 - **Files** (`/files`) - File browser
 - **Shell** (`/shell`) - Command interface
 - **Agents** (`/agents`) - Sub-agent manager
+- **Tool Protocol** (`/toolgate`) - Tool calling configuration
 
 ### Slash Commands
 
@@ -400,6 +421,18 @@ Cathedral exposes a comprehensive REST API. Full documentation available at `/do
 | `GET` | `/api/events` | Subscribe to events (SSE) |
 | `GET` | `/api/health` | System health status |
 
+### ToolGate Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/toolgate` | Tool Protocol editor UI |
+| `GET` | `/api/toolgate/prompt` | Get current tool prompt config |
+| `POST` | `/api/toolgate/prompt` | Update tool prompt (requires acknowledgment) |
+| `POST` | `/api/toolgate/prompt/restore` | Restore default prompt |
+| `GET` | `/api/toolgate/prompt/validate` | Validate prompt syntax |
+| `GET` | `/api/toolgate/tools` | List available tools |
+| `GET` | `/api/toolgate/status` | ToolGate health status |
+
 ### Full API Documentation
 
 See [`docs/FEATURES.md`](docs/FEATURES.md) for complete endpoint documentation including:
@@ -424,16 +457,16 @@ Cathedral uses a "Gate" pattern where each subsystem is independently initialize
 ├─────────────────────────────────────────────────────────────────┤
 │                         API Routers                             │
 │  chat | config | health | memory | scripture | personalities   │
-│  security | files | shell | browser | subagent | events        │
+│  security | files | shell | browser | subagent | toolgate      │
 ├─────────────────────────────────────────────────────────────────┤
 │                       Chat Pipeline                             │
 │              (cathedral/pipeline/chat.py)                       │
 ├───────────┬───────────┬───────────┬───────────┬────────────────┤
-│ StarMirror│MemoryGate │Scripture  │Personality│  Security      │
-│   (LLM)   │(Knowledge)│  (RAG)    │  (Agent)  │  (Crypto)      │
+│ StarMirror│  ToolGate │MemoryGate │Scripture  │  Personality   │
+│   (LLM)   │  (Tools)  │(Knowledge)│  (RAG)    │    (Agent)     │
 ├───────────┼───────────┼───────────┼───────────┼────────────────┤
-│FileSystem │  Shell    │  Browser  │ SubAgent  │  Metadata      │
-│  (Files)  │(Commands) │   (Web)   │ (Workers) │  (Routing)     │
+│FileSystem │  Shell    │  Browser  │ SubAgent  │   Security     │
+│  (Files)  │(Commands) │   (Web)   │ (Workers) │   (Crypto)     │
 ├───────────┴───────────┴───────────┴───────────┴────────────────┤
 │                    Shared Utilities                             │
 │         (cathedral/shared: logging, config, db, paths)          │
@@ -454,17 +487,24 @@ User Input
         │
         ├─ 1. Append to Loom (conversation memory)
         │
-        ├─ 2. Build Context:
-        │     ├─ Conversation history
-        │     ├─ Memory injection (MemoryGate)
-        │     └─ RAG context (ScriptureGate)
+        ├─ 2. Build Context (Cathedral Context Assembly Order):
+        │     ├─ [0] Tool Protocol prompt (if tools enabled)
+        │     ├─ [1] Personality system prompt
+        │     ├─ [2] Current user message
+        │     ├─ [3] Memory context (MemoryGate)
+        │     ├─ [4] RAG context (ScriptureGate)
+        │     └─ [5+] Prior conversation history
         │
-        ├─ 3. Apply Personality (system prompt, model)
-        │
-        ├─ 4. Call StarMirror (LLM)
+        ├─ 3. Call StarMirror (LLM)
         │     └─ Stream tokens ──► SSE ──► Client
         │
-        ├─ 5. Store Response in Loom
+        ├─ 4. Tool Execution Loop (if tools enabled):
+        │     ├─ Parse tool calls from response
+        │     ├─ Execute via ToolGate orchestrator
+        │     ├─ Inject results into conversation
+        │     └─ Get next response (repeat until done)
+        │
+        ├─ 5. Store Final Response in Loom
         │
         └─ 6. Post-Processing:
               ├─ Auto-extract memory
@@ -490,6 +530,7 @@ Cathedral/
 │   │   ├── shell.py          # ShellGate endpoints
 │   │   ├── browser.py        # BrowserGate endpoints
 │   │   ├── subagent.py       # SubAgentGate endpoints
+│   │   ├── toolgate.py       # ToolGate endpoints
 │   │   └── events.py         # SSE events endpoint
 │   ├── services/             # Event bus, agent tracker
 │   ├── middleware/           # Security middleware
@@ -525,6 +566,14 @@ Cathedral/
 │   │   ├── fetcher.py        # Page fetching
 │   │   └── websocket_server.py  # Browser extension
 │   ├── SubAgentGate/         # Worker agents
+│   ├── ToolGate/             # Tool calling system
+│   │   ├── models.py         # Protocol types (ToolCall, ToolResult)
+│   │   ├── registry.py       # Tool registry (31 tools)
+│   │   ├── protocol.py       # JSON parsing/validation
+│   │   ├── orchestrator.py   # Execution loop
+│   │   ├── policy.py         # Policy management
+│   │   ├── prompt.py         # Tool prompt generation
+│   │   └── prompt_config.py  # Configurable prompt storage
 │   ├── MetadataChannel/      # Metadata routing
 │   ├── Memory/               # Unified memory interface
 │   ├── Config/               # Configuration management
@@ -575,8 +624,9 @@ Cathedral/
 | **Embeddings** | OpenAI text-embedding-3-small (1536 dim) |
 | **Encryption** | AES-256-GCM + Argon2id (via cryptography lib) |
 | **Events** | Server-Sent Events (SSE) |
-| **Frontend** | Jinja2 templates + vanilla JS |
+| **Frontend** | Jinja2 templates + vanilla JS + Tailwind CSS |
 | **Search** | DuckDuckGo / SearXNG / Brave |
+| **Tool Calling** | Provider-agnostic JSON-in-text protocol (31 tools) |
 
 ---
 
@@ -646,6 +696,7 @@ python -c "from cathedral.shared.db_service import init_db; init_db('your-url')"
 5. Create API router in `altar/api/newgate.py`
 6. Add router to `altar/run.py`
 7. Add tests in `tests/test_newgate.py`
+8. (Optional) Register tools in `cathedral/ToolGate/registry.py` for agentic access
 
 ---
 
@@ -768,6 +819,8 @@ pip install aiosqlite
 - **Protect API keys** - Use environment variables, not config files
 - **Network isolation** - Use firewall rules if exposed on network
 - **Regular backups** - Enable FileSystemGate auto-backup feature
+- **Tool policy control** - ToolGate defaults to READ_ONLY; explicitly enable WRITE/PRIVILEGED policies
+- **Tool prompt protection** - Custom tool prompts require explicit risk acknowledgment
 
 ---
 
