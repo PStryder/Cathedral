@@ -19,9 +19,13 @@ from altar.api import (
     config,
     events,
     files,
+    health,
+    memory,
     personalities,
+    scripture,
     security,
     shell,
+    subagent,
 )
 from altar.lifecycle import startup, shutdown
 from altar.middleware import SecurityMiddleware
@@ -34,9 +38,12 @@ from cathedral import (
     BrowserGate,
     Config,
     FileSystemGate,
+    MemoryGate,
     PersonalityGate,
+    ScriptureGate,
     SecurityManager,
     ShellGate,
+    SubAgentGate,
 )
 
 
@@ -101,3 +108,7 @@ app.include_router(files.create_router(templates, FileSystemGate, emit_event))
 app.include_router(shell.create_router(templates, ShellGate, emit_event))
 app.include_router(browser.create_router(BrowserGate, emit_event))
 app.include_router(events.create_router(event_bus, agent_tracker))
+app.include_router(health.create_router())
+app.include_router(scripture.create_router(templates, ScriptureGate, emit_event))
+app.include_router(memory.create_router(templates, MemoryGate, emit_event))
+app.include_router(subagent.create_router(templates, SubAgentGate, emit_event))

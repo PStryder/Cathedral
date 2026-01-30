@@ -16,10 +16,23 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# Check for database dependencies
+try:
+    import aiosqlite
+    HAS_AIOSQLITE = True
+except ImportError:
+    HAS_AIOSQLITE = False
+
 
 @pytest.fixture(scope="session", autouse=True)
 def init_test_db(tmp_path_factory):
-    """Initialize a SQLite DB for tests."""
+    """Initialize a SQLite DB for tests (if aiosqlite available)."""
+    if not HAS_AIOSQLITE:
+        # Skip DB initialization if aiosqlite not available
+        # Tests requiring DB will be skipped by their own markers
+        yield
+        return
+
     db_path = tmp_path_factory.mktemp("db") / "cathedral_test.sqlite"
     database_url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
 
