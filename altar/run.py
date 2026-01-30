@@ -26,6 +26,7 @@ from altar.api import (
     security,
     shell,
     subagent,
+    toolgate,
 )
 from altar.lifecycle import startup, shutdown
 from altar.middleware import SecurityMiddleware
@@ -112,3 +113,4 @@ app.include_router(health.create_router())
 app.include_router(scripture.create_router(templates, ScriptureGate, emit_event))
 app.include_router(memory.create_router(templates, MemoryGate, emit_event))
 app.include_router(subagent.create_router(templates, SubAgentGate, emit_event))
+app.include_router(toolgate.create_router())

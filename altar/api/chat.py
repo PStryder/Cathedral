@@ -13,6 +13,7 @@ from sse_starlette.sse import EventSourceResponse
 class UserInput(BaseModel):
     user_input: str
     thread_uid: str
+    enable_tools: bool = False  # Enable ToolGate tool calling
 
 
 class ThreadRequest(BaseModel):
@@ -51,7 +52,14 @@ def create_router(templates, process_input_stream, loom, services) -> APIRouter:
 
     @router.post("/api/chat/stream")
     async def api_chat_stream(user_input: UserInput):
-        """Stream chat response using Server-Sent Events."""
+        """
+        Stream chat response using Server-Sent Events.
+
+        Args:
+            user_input: User message
+            thread_uid: Thread identifier
+            enable_tools: Enable ToolGate tool calling (default: False)
+        """
 
         async def generate():
             try:
@@ -59,6 +67,7 @@ def create_router(templates, process_input_stream, loom, services) -> APIRouter:
                     user_input.user_input,
                     user_input.thread_uid,
                     services=services,
+                    enable_tools=user_input.enable_tools,
                 ):
                     yield {"data": json.dumps({"token": token})}
                 yield {"data": json.dumps({"done": True})}
