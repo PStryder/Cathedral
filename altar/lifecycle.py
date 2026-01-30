@@ -11,7 +11,7 @@ from cathedral import (
     Config,
 )
 from cathedral.shared import db_service
-from cathedral.shared.logging import GateLogger
+from cathedral.shared.gate import GateLogger
 from cathedral.MemoryGate.conversation import db as conversation_db
 from cathedral.MemoryGate.discovery import (
     start_discovery,
