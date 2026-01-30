@@ -134,41 +134,52 @@ async def process_input_stream(
             yield token
         return
 
-    # Append user message to conversation history (async with embedding)
-    await loom.append_async("user", user_input, thread_uid=thread_uid)
-
     # Load personality for this thread
     PersonalityGate.initialize()
     personality_id = thread_personalities.get(thread_uid, "default")
     personality = PersonalityGate.load(personality_id) or PersonalityGate.get_default()
 
-    # Build full context with summarization and semantic search
-    full_history = await loom.compose_prompt_context_async(user_input, thread_uid)
+    # ==========================================================================
+    # CATHEDRAL CONTEXT ASSEMBLY ORDER (Normative Specification v1.0)
+    # ==========================================================================
+    #
+    # This ordering is load-bearing. Deviations cause subtle failures.
+    #
+    # INSTRUCTION LAYER (System):
+    #   0. Tool Protocol Kernel     (if tools enabled, immutable)
+    #   1. Personality / Guidance   (editable)
+    #
+    # INTENT LAYER (User):
+    #   2. Current User Message     (NON-NEGOTIABLE POSITION)
+    #
+    # EVIDENCE LAYER (Context):
+    #   3. Memory Context           (labeled, lower priority than user intent)
+    #   4. Scripture / RAG Context  (labeled, lowest priority)
+    #
+    # CONTINUITY LAYER (History):
+    #   5+. Prior Assistant / User Turns
+    #
+    # Prohibited:
+    #   ❌ Memory or RAG before current user message
+    #   ❌ Retrieved context ahead of tool protocol
+    #   ❌ Interleaving memory inside assistant history
+    # ==========================================================================
 
-    # === PROMPT INJECTION ORDER ===
-    # The order matters! We build from the bottom up using insert(0):
-    #   [ Tool Protocol Kernel ]     <- Position 0 (injected last, appears first)
-    #   [ Personality / Guidance ]   <- Position 1
-    #   [ Memory / Scripture / RAG ] <- Position 2+
-    #   [ User / Assistant history ] <- Original content
+    # Build prior conversation history (BEFORE appending current message)
+    # This gives us positions 5+ (continuity layer)
+    prior_history = await loom.compose_prompt_context_async(user_input, thread_uid)
 
-    # Inject semantically relevant memories from MemoryGate
+    # Now append current user message to storage (for future turns)
+    await loom.append_async("user", user_input, thread_uid=thread_uid)
+
+    # Gather evidence layer content
     memory_context = build_memory_context(user_input, limit=3, min_confidence=0.5)
-    if memory_context:
-        await _emit(services, "memory", "Injecting relevant memories")
-        full_history.insert(0, {"role": "system", "content": memory_context})
-
-    # Inject relevant documents from ScriptureGate (RAG)
     scripture_context = await ScriptureGate.build_context(user_input, limit=2, min_similarity=0.4)
-    if scripture_context:
-        await _emit(services, "system", "RAG context loaded")
-        full_history.insert(0, {"role": "system", "content": scripture_context})
 
-    # Inject personality system prompt (before memory/scripture)
-    system_prompt = personality.get_system_prompt()
-    full_history.insert(0, {"role": "system", "content": system_prompt})
+    # === ASSEMBLE IN SPEC ORDER ===
+    messages = []
 
-    # Inject tool protocol kernel FIRST (before personality) when tools enabled
+    # Position 0: Tool Protocol Kernel (if enabled)
     if enable_tools:
         ToolGate.initialize()
         tool_prompt = ToolGate.build_tool_prompt(
@@ -176,7 +187,35 @@ async def process_input_stream(
         )
         if tool_prompt:
             await _emit(services, "tool", "Tool calling enabled")
-            full_history.insert(0, {"role": "system", "content": tool_prompt})
+            messages.append({"role": "system", "content": tool_prompt})
+
+    # Position 1: Personality / Guidance
+    system_prompt = personality.get_system_prompt()
+    messages.append({"role": "system", "content": system_prompt})
+
+    # Position 2: Current User Message (NON-NEGOTIABLE)
+    messages.append({"role": "user", "content": user_input})
+
+    # Position 3: Memory Context (labeled)
+    if memory_context:
+        await _emit(services, "memory", "Injecting relevant memories")
+        messages.append({
+            "role": "system",
+            "content": f"[Memory Context]\n{memory_context}"
+        })
+
+    # Position 4: Scripture / RAG Context (labeled)
+    if scripture_context:
+        await _emit(services, "system", "RAG context loaded")
+        messages.append({
+            "role": "system",
+            "content": f"[Relevant Documents]\n{scripture_context}"
+        })
+
+    # Position 5+: Prior History (continuity layer)
+    messages.extend(prior_history)
+
+    full_history = messages
 
     # Get model response
     model = personality.llm_config.model
