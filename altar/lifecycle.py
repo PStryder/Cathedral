@@ -90,16 +90,16 @@ async def shutdown():
         loom.disable_discovery()
         await stop_discovery()
         print("[Cathedral] Knowledge Discovery service stopped")
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[Cathedral] Knowledge Discovery shutdown error: {e}")
 
     # Stop BrowserGate WebSocket server
     try:
         from cathedral.BrowserGate import stop_extension_server
         await stop_extension_server()
         print("[Cathedral] BrowserGate WebSocket server stopped")
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[Cathedral] BrowserGate shutdown error: {e}")
 
 
 __all__ = ["startup", "shutdown"]

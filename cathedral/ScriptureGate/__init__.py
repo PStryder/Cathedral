@@ -716,3 +716,38 @@ def stats() -> Dict:
             "by_type": by_type,
             "total_size_mb": round(total_size / (1024 * 1024), 2),
         }
+
+
+__all__ = [
+    # Initialization
+    "init_scripture_db",
+    # Health
+    "is_healthy",
+    "get_health_status",
+    "get_dependencies",
+    # Storage
+    "store",
+    "store_text",
+    "store_artifact",
+    # Retrieval
+    "get",
+    "get_by_ref",
+    "list_scriptures",
+    "search",
+    # Read
+    "read",
+    "get_path",
+    # Delete
+    "remove",
+    # RAG
+    "build_context",
+    # Stats
+    "stats",
+    # Legacy
+    "export_thread",
+    "import_bios",
+    "import_glyph",
+    # Models
+    "Scripture",
+    "SCRIPTURE_ROOT",
+]

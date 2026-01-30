@@ -62,13 +62,71 @@ class MetadataChannel:
 
     def check_policy(self, query: str, context: dict) -> bool:
         """
-        Policy enforcement stub.
+        Policy enforcement for metadata queries.
 
-        Override or extend for access control.
-        Currently allows all queries.
+        Implements basic access control:
+        - Rate limiting (configurable)
+        - Field restrictions (configurable)
+        - Context requirements validation
+
+        Args:
+            query: The target query string
+            context: Query context with caller info
+
+        Returns:
+            True if query is allowed, False otherwise
         """
-        # Future: implement ACL, rate limiting, field restrictions
+        # Check if policy is disabled (for testing/development)
+        if getattr(self, '_policy_disabled', False):
+            return True
+
+        # Validate required context for most queries
+        if query not in ("current", "thread"):
+            # Non-basic queries require thread context
+            if not context.get("thread_uid"):
+                return False
+
+        # Check field restrictions if configured
+        restricted_fields = getattr(self, '_restricted_fields', set())
+        if restricted_fields:
+            requested_fields = context.get("fields", [])
+            if any(f in restricted_fields for f in (requested_fields or [])):
+                return False
+
+        # Rate limiting check (simple token bucket)
+        rate_limit = getattr(self, '_rate_limit', None)
+        if rate_limit:
+            caller = context.get("caller", "default")
+            now = time.time()
+            if not hasattr(self, '_rate_tokens'):
+                self._rate_tokens = {}
+            tokens = self._rate_tokens.get(caller, {"count": 0, "reset_at": now})
+            if now > tokens["reset_at"]:
+                tokens = {"count": 0, "reset_at": now + 60}  # Reset every minute
+            if tokens["count"] >= rate_limit:
+                return False
+            tokens["count"] += 1
+            self._rate_tokens[caller] = tokens
+
         return True
+
+    def configure_policy(
+        self,
+        disabled: bool = False,
+        restricted_fields: list = None,
+        rate_limit: int = None
+    ) -> None:
+        """
+        Configure policy enforcement.
+
+        Args:
+            disabled: If True, bypass all policy checks
+            restricted_fields: List of field names to block
+            rate_limit: Max queries per minute per caller (None = unlimited)
+        """
+        self._policy_disabled = disabled
+        self._restricted_fields = set(restricted_fields or [])
+        self._rate_limit = rate_limit
 
     def query(
         self,

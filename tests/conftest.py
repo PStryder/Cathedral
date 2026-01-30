@@ -23,6 +23,27 @@ try:
 except ImportError:
     HAS_AIOSQLITE = False
 
+# Check for pytest-asyncio
+try:
+    import pytest_asyncio
+    HAS_PYTEST_ASYNCIO = True
+except ImportError:
+    HAS_PYTEST_ASYNCIO = False
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip async tests if pytest-asyncio is not installed."""
+    if HAS_PYTEST_ASYNCIO:
+        return
+
+    import asyncio
+    skip_asyncio = pytest.mark.skip(
+        reason="pytest-asyncio not installed - async tests require pytest-asyncio"
+    )
+    for item in items:
+        if asyncio.iscoroutinefunction(item.function):
+            item.add_marker(skip_asyncio)
+
 
 @pytest.fixture(scope="session", autouse=True)
 def init_test_db(tmp_path_factory):
@@ -132,19 +153,56 @@ def reset_module_state():
 
     # Reset ShellGate
     try:
-        from cathedral.ShellGate import __init__ as shell_init
-        shell_init._config = None
-        shell_init._history = []
-        shell_init._initialized = False
+        import cathedral.ShellGate as shell_gate
+        shell_gate._config = None
+        shell_gate._history = []
+        shell_gate._initialized = False
     except (ImportError, AttributeError):
         pass
 
     # Reset FileSystemGate
     try:
-        from cathedral.FileSystemGate import __init__ as fs_init
-        fs_init._config = None
-        fs_init._backup_manager = None
-        fs_init._initialized = False
+        import cathedral.FileSystemGate as fs_gate
+        fs_gate._config = None
+        fs_gate._backup_manager = None
+        fs_gate._initialized = False
+    except (ImportError, AttributeError):
+        pass
+
+    # Reset PersonalityGate
+    try:
+        from cathedral.PersonalityGate import PersonalityManager
+        PersonalityManager._cache = {}
+        PersonalityManager._initialized = False
+    except (ImportError, AttributeError):
+        pass
+
+    # Reset BrowserGate
+    try:
+        import cathedral.BrowserGate as browser_gate
+        browser_gate._browser = None
+    except (ImportError, AttributeError):
+        pass
+
+    # Reset SubAgentGate
+    try:
+        import cathedral.SubAgentGate as subagent_gate
+        subagent_gate._manager = None
+    except (ImportError, AttributeError):
+        pass
+
+    # Reset MemoryGate
+    try:
+        import cathedral.MemoryGate as memory_gate
+        memory_gate._initialized = False
+        memory_gate._context = None
+    except (ImportError, AttributeError):
+        pass
+
+    # Reset Config
+    try:
+        import cathedral.Config as config_module
+        config_module._manager = None
     except (ImportError, AttributeError):
         pass
 

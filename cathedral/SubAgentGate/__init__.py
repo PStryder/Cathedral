@@ -360,3 +360,21 @@ def cancel(agent_id: str) -> bool:
 def check_completed() -> List[str]:
     """Check for newly completed agents."""
     return get_manager().check_completed()
+
+
+__all__ = [
+    # Class
+    "SubAgentManager",
+    # Lifecycle
+    "get_manager",
+    # Agent operations
+    "spawn",
+    "status",
+    "result",
+    "list_agents",
+    "cancel",
+    "check_completed",
+    # Models
+    "SubAgent",
+    "AgentStatus",
+]

@@ -68,8 +68,10 @@ class ConfigManager:
             try:
                 with open(CONFIG_JSON) as f:
                     json_config = json.load(f)
-            except (json.JSONDecodeError, IOError):
-                pass
+            except json.JSONDecodeError as e:
+                _log.warning(f"Invalid JSON in config file {CONFIG_JSON}: {e}")
+            except IOError as e:
+                _log.warning(f"Could not read config file {CONFIG_JSON}: {e}")
 
         # Build config from schema
         for field in CONFIG_SCHEMA:

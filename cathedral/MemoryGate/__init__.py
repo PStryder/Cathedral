@@ -624,3 +624,39 @@ def get_by_ref(ref: str) -> Optional[dict]:
 def format_ref(mem_type: str, mem_id: int) -> str:
     """Format a memory reference string."""
     return f"{mem_type}:{mem_id}"
+
+
+__all__ = [
+    # Lifecycle
+    "initialize",
+    "is_healthy",
+    "get_health_status",
+    "get_dependencies",
+    "get_context",
+    # Storage
+    "store_observation",
+    "store_pattern",
+    "store_concept",
+    # Retrieval
+    "search",
+    "recall",
+    "get_stats",
+    "get_pattern",
+    "list_patterns",
+    "get_concept",
+    # Relationships
+    "add_concept_alias",
+    "add_concept_relationship",
+    "get_related_concepts",
+    "add_relationship",
+    "get_related",
+    "related",
+    # Chains
+    "create_chain",
+    "append_to_chain",
+    "get_chain",
+    "list_chains",
+    # References
+    "get_by_ref",
+    "format_ref",
+]

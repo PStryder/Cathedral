@@ -622,3 +622,28 @@ def get_history(limit: int = 50) -> List[Dict[str, Any]]:
 def validate_command(command: str) -> Tuple[bool, Optional[str]]:
     """Validate a command."""
     return ShellGate.validate_command(command)
+
+
+__all__ = [
+    # Class
+    "ShellGate",
+    # Lifecycle
+    "initialize",
+    "is_initialized",
+    # Execution
+    "execute",
+    "execute_async",
+    "execute_background",
+    "get_status",
+    "cancel",
+    # History
+    "get_history",
+    # Security
+    "validate_command",
+    # Models
+    "CommandResult",
+    "CommandExecution",
+    "CommandStatus",
+    # Errors
+    "CommandSecurityError",
+]

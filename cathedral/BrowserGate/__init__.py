@@ -220,14 +220,21 @@ class BrowserGate:
 
     def get_health_status(self) -> Dict[str, Any]:
         """Get detailed health information."""
+        # Check WebSocket server status
+        ws_server = get_server()
+        ws_running = ws_server is not None and ws_server.is_running
+
         checks = {
             "fetcher_available": self._fetcher is not None,
+            "websocket_server": ws_running,
         }
 
         details = {
             "default_provider": self.config.default_provider.value,
             "default_fetch_mode": self.config.default_fetch_mode.value,
             "available_providers": self.list_providers(),
+            "websocket_port": ws_server.port if ws_running else None,
+            "websocket_connections": len(ws_server.connections) if ws_running else 0,
         }
 
         return build_health_status(

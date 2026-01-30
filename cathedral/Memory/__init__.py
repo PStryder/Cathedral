@@ -42,6 +42,15 @@ def _get_memorygate():
     return MemoryGate
 
 
+def _handle_extraction_task_exception(task: asyncio.Task) -> None:
+    """Handle exceptions from background extraction tasks."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc:
+        _log.error(f"Background extraction failed: {exc}")
+
+
 class UnifiedMemory:
     """
     Unified memory interface for Cathedral.
@@ -130,15 +139,6 @@ class UnifiedMemory:
             task.add_done_callback(_handle_extraction_task_exception)
 
         return message_uid
-
-
-def _handle_extraction_task_exception(task: asyncio.Task) -> None:
-    """Handle exceptions from background extraction tasks."""
-    if task.cancelled():
-        return
-    exc = task.exception()
-    if exc:
-        _log.error(f" Background extraction failed: {exc}")
 
     async def recall_conversation(
         self,

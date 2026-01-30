@@ -812,3 +812,34 @@ def list_backups(folder_id: Optional[str] = None, limit: int = 50) -> List[Dict[
 def restore_backup(backup_id: str, overwrite: bool = True) -> Tuple[bool, str]:
     """Restore from backup."""
     return FileSystemGate.restore_backup(backup_id, overwrite)
+
+
+__all__ = [
+    # Class
+    "FileSystemGate",
+    # Health
+    "is_initialized",
+    # Folder management
+    "initialize",
+    "add_folder",
+    "remove_folder",
+    "list_folders",
+    "get_folder",
+    # File operations
+    "list_dir",
+    "read_file",
+    "write_file",
+    "mkdir",
+    "delete",
+    # Backup
+    "list_backups",
+    "restore_backup",
+    # Models
+    "FolderConfig",
+    "FolderPermission",
+    "BackupPolicy",
+    "OperationResult",
+    "FileInfo",
+    # Errors
+    "PathSecurityError",
+]

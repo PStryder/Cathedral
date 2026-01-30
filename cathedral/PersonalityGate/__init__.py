@@ -568,3 +568,24 @@ def import_personality(file_path: str, new_id: str = None) -> Optional[Personali
 def initialize():
     """Initialize the personality system."""
     PersonalityManager.initialize()
+
+
+__all__ = [
+    # Class
+    "PersonalityManager",
+    # Lifecycle
+    "initialize",
+    # CRUD
+    "load",
+    "get_default",
+    "create",
+    "list_all",
+    "exists",
+    # Import/Export
+    "export_personality",
+    "import_personality",
+    # Models
+    "Personality",
+    "PersonalitySnapshot",
+    "LLMConfig",
+]
