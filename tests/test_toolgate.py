@@ -3,6 +3,8 @@ Tests for ToolGate - Cathedral Tool Call Protocol.
 """
 
 import pytest
+import asyncio
+from unittest.mock import AsyncMock, patch, MagicMock
 from cathedral.ToolGate import (
     PolicyClass,
     ToolCall,
@@ -428,7 +430,7 @@ class TestPromptConfiguration:
 
         version = get_prompt_version()
         assert version == PROMPT_VERSION
-        assert "." in version  # Semver-ish
+        assert "tool_protocol_v" in version  # Named version format
 
     def test_validate_prompt_valid(self):
         """Should validate a valid prompt."""
@@ -526,8 +528,8 @@ class TestPromptConfiguration:
 
         warning = get_edit_warning()
 
-        assert "WARNING" in warning
-        assert "break" in warning.lower() or "risk" in warning.lower()
+        assert "DANGER" in warning or "BREAKS" in warning
+        assert "tool" in warning.lower()
 
     def test_default_prompt_has_required_elements(self):
         """Default prompt should have all required elements."""
@@ -588,3 +590,113 @@ class TestPromptConfiguration:
         # Without example
         prompt_without = build_tool_prompt(include_example=False)
         assert "Example" not in prompt_without or "## Example" not in prompt_without
+
+
+# =============================================================================
+# SENTINEL TEST - Protects the entire tool calling system
+# =============================================================================
+
+
+class TestToolExecutionSentinel:
+    """
+    THE SENTINEL TEST.
+
+    This single test protects the tool calling system for years.
+    If this breaks, tool calling is broken.
+    """
+
+    @pytest.mark.asyncio
+    async def test_valid_tool_call_executes_and_returns_result(self):
+        """
+        SENTINEL: When model emits valid tool_call JSON, tool executes and result is injected.
+
+        This is THE test that protects the entire ToolGate system.
+        It verifies the complete flow:
+        1. Parse tool call from model output
+        2. Look up tool in registry
+        3. Validate arguments
+        4. Check policy
+        5. Execute tool
+        6. Return result as ToolResult
+
+        If this test fails, the tool calling system is broken.
+        """
+        from cathedral.ToolGate import (
+            ToolOrchestrator,
+            ToolRegistry,
+            PolicyManager,
+            PolicyClass,
+            ToolBudget,
+            parse_tool_calls,
+            ToolResult,
+        )
+
+        # Initialize registry
+        ToolRegistry.initialize()
+
+        # Create policy manager that allows READ_ONLY
+        policy_manager = PolicyManager()
+        # READ_ONLY is enabled by default
+
+        # Create orchestrator
+        budget = ToolBudget(max_iterations=3, max_calls_per_step=5)
+        orchestrator = ToolOrchestrator(
+            policy_manager=policy_manager,
+            budget=budget,
+        )
+
+        # Simulate model output with valid tool call JSON
+        model_output = '''I'll search for that information.
+{"type": "tool_call", "id": "tc_test_001", "tool": "MemoryGate.search", "args": {"query": "cathedral", "limit": 5}}'''
+
+        # Step 1: Parse the tool call
+        remaining_text, tool_calls = parse_tool_calls(model_output)
+
+        # CRITICAL ASSERTION 1: Tool call was parsed
+        assert len(tool_calls) == 1, "Must parse exactly one tool call"
+        assert tool_calls[0].id == "tc_test_001"
+        assert tool_calls[0].tool == "MemoryGate.search"
+        assert tool_calls[0].args == {"query": "cathedral", "limit": 5}
+
+        # Step 2: Look up tool in registry
+        tool = ToolRegistry.get_tool("MemoryGate.search")
+
+        # CRITICAL ASSERTION 2: Tool exists in registry
+        assert tool is not None, "MemoryGate.search must exist in registry"
+        assert tool.gate == "MemoryGate"
+        assert tool.method == "search"
+
+        # Step 3: Execute tool (mock the actual gate call)
+        with patch("cathedral.ToolGate.orchestrator._dispatch_tool") as mock_dispatch:
+            # Mock successful tool execution
+            mock_dispatch.return_value = {
+                "items": [
+                    {"id": 1, "content": "Cathedral memory result"},
+                ],
+                "total": 1,
+            }
+
+            result = await orchestrator.execute_single(tool_calls[0])
+
+            # CRITICAL ASSERTION 3: Tool was called
+            mock_dispatch.assert_called_once()
+
+            # CRITICAL ASSERTION 4: Result is successful ToolResult
+            assert isinstance(result, ToolResult)
+            assert result.ok is True
+            assert result.id == "tc_test_001"
+            assert result.result is not None
+            assert "items" in result.result
+
+        # Step 4: Verify the result can be formatted for injection
+        from cathedral.ToolGate import format_tool_results
+
+        formatted = format_tool_results([result])
+
+        # CRITICAL ASSERTION 5: Result is properly formatted
+        assert "[TOOL RESULTS]" in formatted
+        assert "tc_test_001" in formatted
+        assert "SUCCESS" in formatted
+
+        # If we get here, the entire tool calling flow works
+        # This test protects the system for years

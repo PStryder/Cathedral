@@ -20,6 +20,7 @@ class ConfigType(Enum):
     PATH = "path"          # File system path
     URL = "url"
     LIST = "list"          # Comma-separated values
+    TEXT = "text"          # Large text block (multiline)
 
 
 class ConfigCategory(Enum):
@@ -30,6 +31,7 @@ class ConfigCategory(Enum):
     SERVER = "server"
     MODELS = "models"
     FEATURES = "features"
+    TOOL_PROTOCOL = "tool_protocol"  # Tool calling system prompts
 
 
 @dataclass
@@ -306,6 +308,34 @@ CONFIG_SCHEMA: List[ConfigField] = [
         required=False,
         default="single",
         options=["single", "multi"],
+    ),
+
+    # === Tool Protocol ===
+    ConfigField(
+        key="TOOL_PROTOCOL_VERSION",
+        description="Version of the tool protocol system prompt",
+        config_type=ConfigType.STRING,
+        category=ConfigCategory.TOOL_PROTOCOL,
+        required=False,
+        default="tool_protocol_v1",
+    ),
+    ConfigField(
+        key="TOOL_PROTOCOL_PROMPT",
+        description="System prompt that teaches the model how to call Cathedral tools. "
+                    "WARNING: Modifying this incorrectly will break tool calling entirely.",
+        config_type=ConfigType.TEXT,
+        category=ConfigCategory.TOOL_PROTOCOL,
+        required=False,
+        default=None,  # Loaded from ToolGate
+        restart_required=True,
+    ),
+    ConfigField(
+        key="TOOL_PROTOCOL_IS_CUSTOM",
+        description="Whether a custom tool protocol prompt is in use",
+        config_type=ConfigType.BOOLEAN,
+        category=ConfigCategory.TOOL_PROTOCOL,
+        required=False,
+        default=False,
     ),
 ]
 

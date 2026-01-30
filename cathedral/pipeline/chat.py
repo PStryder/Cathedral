@@ -145,23 +145,30 @@ async def process_input_stream(
     # Build full context with summarization and semantic search
     full_history = await loom.compose_prompt_context_async(user_input, thread_uid)
 
-    # Inject personality system prompt at the start
-    system_prompt = personality.get_system_prompt()
-    full_history.insert(0, {"role": "system", "content": system_prompt})
+    # === PROMPT INJECTION ORDER ===
+    # The order matters! We build from the bottom up using insert(0):
+    #   [ Tool Protocol Kernel ]     <- Position 0 (injected last, appears first)
+    #   [ Personality / Guidance ]   <- Position 1
+    #   [ Memory / Scripture / RAG ] <- Position 2+
+    #   [ User / Assistant history ] <- Original content
 
     # Inject semantically relevant memories from MemoryGate
     memory_context = build_memory_context(user_input, limit=3, min_confidence=0.5)
     if memory_context:
         await _emit(services, "memory", "Injecting relevant memories")
-        full_history.insert(1, {"role": "system", "content": memory_context})
+        full_history.insert(0, {"role": "system", "content": memory_context})
 
     # Inject relevant documents from ScriptureGate (RAG)
     scripture_context = await ScriptureGate.build_context(user_input, limit=2, min_similarity=0.4)
     if scripture_context:
         await _emit(services, "system", "RAG context loaded")
-        full_history.insert(1, {"role": "system", "content": scripture_context})
+        full_history.insert(0, {"role": "system", "content": scripture_context})
 
-    # Inject tool instructions if tools are enabled
+    # Inject personality system prompt (before memory/scripture)
+    system_prompt = personality.get_system_prompt()
+    full_history.insert(0, {"role": "system", "content": system_prompt})
+
+    # Inject tool protocol kernel FIRST (before personality) when tools enabled
     if enable_tools:
         ToolGate.initialize()
         tool_prompt = ToolGate.build_tool_prompt(
@@ -169,7 +176,7 @@ async def process_input_stream(
         )
         if tool_prompt:
             await _emit(services, "tool", "Tool calling enabled")
-            full_history.insert(1, {"role": "system", "content": tool_prompt})
+            full_history.insert(0, {"role": "system", "content": tool_prompt})
 
     # Get model response
     model = personality.llm_config.model

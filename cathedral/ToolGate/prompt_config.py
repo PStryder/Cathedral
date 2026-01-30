@@ -25,7 +25,7 @@ _log = GateLogger.get("ToolGate")
 # Default Prompt (Versioned)
 # =============================================================================
 
-PROMPT_VERSION = "1.1.0"
+PROMPT_VERSION = "tool_protocol_v1"
 
 DEFAULT_TOOL_PROTOCOL_PROMPT = """You are an AI agent operating inside Cathedral, a system that provides structured tools.
 
@@ -351,18 +351,28 @@ class ToolPromptManager:
 # =============================================================================
 
 EDIT_WARNING = """
-WARNING: You are about to edit the Tool Protocol System Prompt.
-
-This prompt teaches the AI model how to call Cathedral tools. If you break this
-prompt, tool calling will stop working entirely.
-
-Specifically, the prompt MUST contain these elements:
-- JSON format examples with "type", "tool_call", "id", "tool", "args"
-- Instructions about "TOOL RESULTS" format
-
-If tool calling breaks after your edit, use restore_default() to fix it.
-
-Do you understand the risks and wish to proceed?
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                    ⚠️  DANGER: TOOL PROTOCOL PROMPT  ⚠️                       ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║                                                                              ║
+║  FUCKING THIS UP BREAKS EVERYTHING.                                         ║
+║                                                                              ║
+║  This prompt teaches the AI how to call Cathedral tools.                    ║
+║  If you break it, ALL tool calling stops working.                           ║
+║                                                                              ║
+║  The prompt MUST contain these exact markers:                               ║
+║    • "type": "tool_call"                                                    ║
+║    • "id", "tool", "args" fields                                            ║
+║    • "tool_result" for response handling                                    ║
+║                                                                              ║
+║  If you break this:                                                         ║
+║    → Tools stop working                                                     ║
+║    → The model emits garbage JSON                                           ║
+║    → Everything falls apart                                                 ║
+║                                                                              ║
+║  FIX: Click "Restore Default" to recover.                                   ║
+║                                                                              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
 """
 
 BROKEN_PROMPT_WARNING = """
