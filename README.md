@@ -1,248 +1,584 @@
 # Cathedral
 
-A local AI chat application with persistent memory, knowledge discovery, and system integration capabilities.
+<div align="center">
 
-Cathedral is a modular, extensible platform for AI-powered multi-modal conversation with knowledge preservation, security, and deep system integration. Built with Python/FastAPI backend and PostgreSQL + pgvector for semantic search.
+**A modular AI assistant platform with persistent memory, semantic search, and system integration.**
+
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green.svg)](https://fastapi.tiangolo.com/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-blue.svg)](https://www.postgresql.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+[Features](#features) | [Quick Start](#quick-start) | [Configuration](#configuration) | [Usage](#usage) | [API](#api-reference) | [Development](#development)
+
+</div>
+
+---
+
+## Overview
+
+Cathedral is a self-hosted AI conversation platform that combines:
+
+- **Persistent Memory** - Every conversation is stored and semantically searchable
+- **Knowledge Extraction** - Automatically extracts facts, concepts, and patterns from conversations
+- **RAG Integration** - Store documents and inject relevant context into prompts
+- **System Integration** - Secure file access, shell commands, web browsing
+- **Multi-Modal Support** - Image analysis, audio transcription, vision understanding
+- **Modular Architecture** - Enable/disable features via configuration
+
+Built with FastAPI, PostgreSQL + pgvector, and designed for local deployment.
+
+---
 
 ## Features
 
-### Core Capabilities
+### Conversation & Memory
 
-- **Multi-Thread Conversations** - Independent chat threads with separate histories and personalities
-- **Semantic Memory** - All messages embedded and searchable via vector similarity
-- **Knowledge Extraction** - Automatic extraction of observations, concepts, and patterns from conversations
-- **Knowledge Discovery** - Background async discovery of relationships via embedding similarity
-- **RAG Integration** - Document library with semantic search and context injection
-- **Multi-Modal** - Image analysis, audio transcription, vision understanding
-- **Customizable Personalities** - Per-thread agent behavior with model/temperature control
+| Feature | Description |
+|---------|-------------|
+| **Multi-Thread Chats** | Independent conversation threads with separate histories |
+| **Semantic Search** | All messages embedded and searchable via vector similarity |
+| **Thread Summaries** | Automatic summarization of long conversations |
+| **Personality Per Thread** | Different agent behaviors for different threads |
+| **Context Injection** | Automatic retrieval of relevant past conversations |
+
+### Knowledge System (MemoryGate)
+
+| Feature | Description |
+|---------|-------------|
+| **Observations** | Store facts with confidence scores and domains |
+| **Concepts** | Knowledge graph nodes with relationships |
+| **Patterns** | Synthesized insights across conversations |
+| **Auto-Extraction** | Background extraction of knowledge from chats |
+| **Knowledge Discovery** | Async discovery of relationships via embeddings |
+
+### Document Library (ScriptureGate)
+
+| Feature | Description |
+|---------|-------------|
+| **Document Storage** | Store files with automatic organization |
+| **Content Extraction** | Extract text from PDFs, images, audio |
+| **Semantic Search** | Find documents by meaning, not just keywords |
+| **RAG Context** | Automatically inject relevant documents into prompts |
+| **Multiple Types** | Documents, images, audio, artifacts, threads |
 
 ### System Integration
 
-- **Secure Shell Execution** - Command validation, blocking, and sandboxing
-- **File Management** - Controlled folder access with automatic backups
-- **Web Browsing** - Search and fetch with multiple providers
-- **Sub-Agent Delegation** - Spawn async worker tasks
-- **Browser Extension** - WebSocket integration for context menus
+| Feature | Description |
+|---------|-------------|
+| **Secure Shell** | Command execution with blocklist/allowlist validation |
+| **File Management** | Folder-based permissions with auto-backup |
+| **Web Browsing** | Multi-provider search (DuckDuckGo, Brave, SearXNG) |
+| **Page Fetching** | Simple or headless browser with content conversion |
+| **Sub-Agents** | Spawn async worker tasks for background processing |
+| **Browser Extension** | WebSocket server for browser integration |
+
+### Multi-Modal
+
+| Feature | Description |
+|---------|-------------|
+| **Vision** | Analyze images with vision-capable models |
+| **Image Description** | Detailed image content descriptions |
+| **Image Comparison** | Compare two images |
+| **Audio Transcription** | Speech-to-text via Whisper API |
 
 ### Security
 
-- **AES-256-GCM Encryption** - Master password protection
-- **Session Locking** - Timeout-based auto-lock
-- **Component-Level Controls** - Granular encryption settings
+| Feature | Description |
+|---------|-------------|
+| **AES-256-GCM** | Military-grade encryption for sensitive data |
+| **Argon2id** | Secure password hashing |
+| **Session Locking** | Timeout-based auto-lock |
+| **Path Validation** | Prevent directory traversal attacks |
+| **Command Filtering** | Block dangerous shell commands |
 
-## Architecture
+---
 
-Cathedral is organized into "Gates" - modular subsystems that can be enabled/disabled:
+## Quick Start
 
-| Gate | Purpose |
-|------|---------|
-| **StarMirror** | LLM interface (OpenRouter API, 40+ models) |
-| **Conversation** | Conversation memory with semantic search (MemoryGate) |
-| **MemoryGate** | Knowledge system (observations, concepts, patterns) |
-| **ScriptureGate** | Document library and RAG |
-| **PersonalityGate** | Agent personality management |
-| **SecurityManager** | Encryption and access control |
-| **FileSystemGate** | Managed file access with backups |
-| **ShellGate** | Secure command execution |
-| **BrowserGate** | Web search and page fetching |
-| **SubAgentGate** | Async worker delegation |
+### Prerequisites
 
-## Requirements
+- **Python 3.10+**
+- **PostgreSQL 15+** with pgvector extension (or SQLite for testing)
+- **OpenRouter API key** (for LLM access)
+- **OpenAI API key** (for embeddings)
 
-- Python 3.11+
-- PostgreSQL 15+ with pgvector extension
-- OpenRouter API key (for LLM access)
-- OpenAI API key (for embeddings)
+### Installation
 
-## Installation
-
-1. Clone the repository:
 ```bash
+# Clone the repository
 git clone https://github.com/PStryder/Cathedral.git
 cd Cathedral
-```
 
-2. Create virtual environment:
-```bash
+# Create virtual environment
 python -m venv venv
 source venv/bin/activate  # Linux/Mac
-venv\Scripts\activate     # Windows
-```
+# or: venv\Scripts\activate  # Windows
 
-3. Install dependencies:
-```bash
+# Install dependencies
 pip install -r requirements.txt
-```
 
-Optional: enable local LoomMirror summarization (llama-cpp-python):
-```bash
+# Optional: Local LLM for summarization
 pip install -r requirements-llama.txt
 ```
-You can also install from PyPI instead of the local checkout:
-```bash
-pip install llama-cpp-python
-```
 
-4. Set up PostgreSQL with pgvector:
+### Database Setup
+
+#### Option A: PostgreSQL (Recommended for Production)
+
 ```sql
+-- Create database
 CREATE DATABASE cathedral;
 \c cathedral
+
+-- Enable pgvector extension
 CREATE EXTENSION vector;
 ```
 
-5. Configure environment:
 ```bash
-cp .env.example .env
-# Edit .env with your settings
+# Set environment variable
+export DATABASE_URL="postgresql://user:password@localhost:5432/cathedral"
 ```
 
-Required environment variables:
+#### Option B: SQLite (Quick Start / Development)
+
+```bash
+# SQLite requires no setup - just set the URL
+export DATABASE_URL="sqlite+aiosqlite:///./data/cathedral.db"
+export DB_BACKEND="sqlite"
+export VECTOR_BACKEND="faiss"
 ```
+
+### Configuration
+
+```bash
+# Copy example environment file
+cp .env.example .env
+
+# Edit with your settings
+nano .env  # or your preferred editor
+```
+
+**Minimum required settings:**
+
+```env
+# Database
 DATABASE_URL=postgresql://user:pass@localhost:5432/cathedral
-OPENROUTER_API_KEY=sk-or-...
+
+# API Keys
+OPENROUTER_API_KEY=sk-or-v1-...
 OPENAI_API_KEY=sk-...
 ```
 
-6. Run the server:
+### Run the Server
+
 ```bash
+# Production
 python -m altar.run
+
+# Development (with auto-reload)
+uvicorn altar.run:app --reload --port 8000
 ```
 
-The web UI will be available at `http://localhost:8000`
+Open `http://localhost:8000` in your browser.
+
+---
 
 ## Configuration
 
 Cathedral uses a layered configuration system:
 
-1. Environment variables (highest priority)
-2. `data/config.json` (persistent settings)
-3. Schema defaults (lowest priority)
+1. **Environment variables** (highest priority)
+2. **`data/config.json`** (persistent settings)
+3. **Schema defaults** (lowest priority)
 
-Access the configuration UI at `/config` or use the API at `/api/config`.
+Access the configuration UI at `/config` or use the REST API.
 
-### Key Settings
+### All Configuration Options
+
+#### API Keys
+
+| Setting | Description | Required |
+|---------|-------------|----------|
+| `OPENROUTER_API_KEY` | OpenRouter API key for LLM access | Yes |
+| `OPENAI_API_KEY` | OpenAI API key for embeddings | Yes |
+
+#### Database
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection string | Required |
-| `OPENROUTER_API_KEY` | OpenRouter API key | Required |
-| `OPENAI_API_KEY` | OpenAI API key (embeddings) | Required |
-| `LLM_MODEL` | Default LLM model | gpt-4o |
-| `EMBEDDING_MODEL` | Embedding model | text-embedding-3-small |
-| `SERVER_PORT` | Server port | 8000 |
+| `DATABASE_URL` | Database connection string | Required |
+| `DB_BACKEND` | Database type: `postgres` or `sqlite` | `postgres` |
+| `VECTOR_BACKEND` | Vector store: `pgvector` or `faiss` | `pgvector` |
+| `AUTO_MIGRATE_ON_STARTUP` | Auto-create tables | `true` |
+| `AUTO_CREATE_EXTENSIONS` | Auto-create pgvector extension | `true` |
+
+#### Models
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `DEFAULT_MODEL` | Default LLM model | `openai/gpt-4o` |
+| `VISION_MODEL` | Vision-capable model | `openai/gpt-4o` |
+| `EMBEDDING_MODEL` | Embedding model | `text-embedding-3-small` |
+| `EMBEDDING_DIM` | Embedding dimensions | `1536` |
+| `LOOMMIRROR_MODEL_PATH` | Path to local GGUF model | Optional |
+
+#### Server
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `HOST` | Server host | `0.0.0.0` |
+| `PORT` | Server port | `8000` |
+| `ALLOWED_ORIGINS` | CORS origins (comma-separated) | `*` |
+| `DEBUG` | Debug mode | `false` |
+| `LOG_LEVEL` | Logging level | `INFO` |
+
+#### Features
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `ENABLE_MEMORY_GATE` | Enable knowledge system | `true` |
+| `ENABLE_SCRIPTURE_RAG` | Enable document RAG | `true` |
+| `ENABLE_SUBAGENTS` | Enable sub-agent spawning | `true` |
+| `ENABLE_MULTIMODAL` | Enable vision/audio | `true` |
+| `AUTO_EXTRACT_MEMORY` | Auto-extract from conversations | `true` |
+
+#### Paths
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `DATA_DIR` | Runtime data directory | `data` |
+| `SCRIPTURE_DIR` | Document storage | `data/scripture` |
+| `AGENTS_DIR` | Sub-agent data | `data/agents` |
+| `MODELS_DIR` | Local model storage | `models` |
+
+---
 
 ## Usage
 
+### Web Interface
+
+The primary interface is the web UI at `http://localhost:8000/`:
+
+- **Chat** - Main conversation interface
+- **Config** (`/config`) - Configuration editor
+- **Memory** (`/memory`) - Memory browser
+- **Scripture** (`/scripture`) - Document library
+- **Personalities** (`/personalities`) - Personality manager
+- **Security** (`/security`) - Encryption settings
+- **Files** (`/files`) - File browser
+- **Shell** (`/shell`) - Command interface
+- **Agents** (`/agents`) - Sub-agent manager
+
 ### Slash Commands
 
-Cathedral supports 60+ slash commands. Here are the most common:
+Cathedral supports 60+ slash commands in the chat interface.
 
-#### Conversation
-- `/history` - Show thread history
-- `/forget` - Clear thread memory
-- `/personality <id>` - Switch personality
+#### Thread Management
+```
+/history              Show current thread history
+/forget               Clear thread memory
+/export thread        Export thread to scripture
+/import bios <path>   Import bios file
+/import glyph <path>  Import glyph file
+```
 
-#### Memory
-- `/search <query>` - Semantic search all memory
-- `/remember <text>` - Store an observation
-- `/memories` - Recall recent observations
-- `/discover <ref>` - Find related knowledge
-- `/related <ref>` - Show relationships
+#### Memory Operations
+```
+/search <query>       Semantic search across all memory
+/usearch <query>      Unified search (all sources)
+/memory               Show memory status
+/remember <fact>      Store an observation
+/memories [domain]    List memories by domain
+/concept <name>       Get concept details
+/pattern <cat> <name> Get pattern details
+/memstats             Detailed memory statistics
+/discover <text>      Run knowledge discovery
+/related <ref>        Get related items
+/discovery            Discovery service status
+/loomsearch <query>   Search conversation memory
+/backfill             Backfill missing embeddings
+```
 
-#### Documents
-- `/store <path>` - Store file as scripture
-- `/scriptsearch <query>` - Search documents
-- `/scriptures` - List stored documents
+#### Documents (Scripture)
+```
+/store <path>         Store file as scripture
+/scripture <ref>      Get scripture by reference
+/scriptsearch <query> Search documents
+/scriptures [type]    List documents
+/scriptstats          Document statistics
+/scriptindex          Re-index all documents
+```
 
 #### Multi-Modal
-- `/image <path> <prompt>` - Analyze image
-- `/describe <path>` - Describe image
-- `/transcribe <audio>` - Transcribe audio
+```
+/image <path>         Analyze image
+/describe <path>      Describe image content
+/compare <p1> <p2>    Compare two images
+/transcribe <path>    Transcribe audio
+/audio <path>         Audio analysis
+```
 
-#### System
-- `/shell <cmd>` - Execute command
-- `/websearch <query>` - Search the web
-- `/fetch <url>` - Fetch page content
-- `/spawn <task>` - Spawn sub-agent
+#### Sub-Agents
+```
+/spawn <task>         Spawn background agent
+/agents               List all agents
+/agent <id>           Get agent status
+/result <id>          Get agent result
+/cancel <id>          Cancel agent
+```
 
-#### Files
-- `/sources` - List managed folders
-- `/ls <path>` - List directory
-- `/cat <path>` - Read file
+#### Personalities
+```
+/personalities           List all personalities
+/personality <id>        Switch to personality
+/personality             Show current personality
+/personality-info <id>   Get personality details
+/personality-create <n>  Create new personality
+/personality-delete <id> Delete personality
+/personality-export <id> Export personality
+/personality-copy <id>   Duplicate personality
+```
 
-### API
+#### File Operations
+```
+/sources              List managed folders
+/sources-add <id> <p> Add managed folder
+/ls <folder:path>     List directory
+/cat <folder:path>    Read file
+/writefile <f:path>   Write file
+/mkdir <folder:path>  Create directory
+/rm <folder:path>     Delete file/directory
+/backups [folder]     List backups
+/restore <backup_id>  Restore backup
+```
 
-Cathedral exposes a REST API for all functionality:
+#### Shell Execution
+```
+/shell <cmd>          Execute command
+/shellbg <cmd>        Execute in background
+/shellstatus <id>     Get command status
+/shellkill <id>       Cancel command
+/shellhistory         Command history
+```
 
-- `POST /api/chat/stream` - Stream chat response (SSE)
-- `GET /api/threads` - List conversation threads
-- `POST /api/thread` - Create/switch thread
-- `GET /api/config` - Get configuration
-- `GET /api/events` - Subscribe to events (SSE)
+#### Web Browsing
+```
+/websearch <query>    Web search
+/fetch <url>          Fetch page content
+/browse <query>       Search + fetch top results
+```
 
-See the full API documentation at `/docs` when the server is running.
+#### Security
+```
+/lock                 Lock session
+/security             Security status
+/security-status      Detailed security status
+```
 
-## Database Schema
+#### Metadata
+```
+/meta <target>        Query metadata
+/metafields           List available fields
+```
 
-### Conversation Memory (MemoryGate)
-- `threads` - Conversation threads
-- `messages` - Chat messages with embeddings
-- `summaries` - Thread summaries
+---
 
-### MemoryGate (Knowledge)
-- `observations` - Stored facts
-- `concepts` - Knowledge graph nodes
-- `patterns` - Synthesized patterns
-- `relationships` - Entity connections
-- `embeddings` - Unified vector storage
+## API Reference
 
-### ScriptureGate (Documents)
-- `scriptures` - Stored documents with embeddings
+Cathedral exposes a comprehensive REST API. Full documentation available at `/docs` (Swagger UI) when the server is running.
 
-## Technology Stack
+### Core Endpoints
 
-| Component | Technology |
-|-----------|------------|
-| Backend | FastAPI + Uvicorn |
-| Database | PostgreSQL + pgvector |
-| ORM | SQLAlchemy (async) |
-| LLM | OpenRouter API |
-| Local LLM | TinyLlama 1.1B (GGUF) |
-| Embeddings | OpenAI text-embedding-3-small |
-| Encryption | AES-256-GCM + Argon2id |
-| Events | Server-Sent Events (SSE) |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/` | Main chat interface |
+| `POST` | `/api/chat/stream` | Stream chat response (SSE) |
+| `GET` | `/api/threads` | List conversation threads |
+| `POST` | `/api/thread` | Create/switch thread |
+| `GET` | `/api/thread/{uid}/history` | Get thread history |
+| `GET` | `/api/events` | Subscribe to events (SSE) |
+| `GET` | `/api/health` | System health status |
 
-## Project Structure
+### Full API Documentation
+
+See [`docs/FEATURES.md`](docs/FEATURES.md) for complete endpoint documentation including:
+
+- 90+ REST endpoints across 13 routers
+- Request/response formats
+- Authentication requirements
+- Example usage
+
+---
+
+## Architecture
+
+### Gate Pattern
+
+Cathedral uses a "Gate" pattern where each subsystem is independently initialized and can be enabled/disabled:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         FastAPI Server                          │
+│                          (altar/run.py)                         │
+├─────────────────────────────────────────────────────────────────┤
+│                         API Routers                             │
+│  chat | config | health | memory | scripture | personalities   │
+│  security | files | shell | browser | subagent | events        │
+├─────────────────────────────────────────────────────────────────┤
+│                       Chat Pipeline                             │
+│              (cathedral/pipeline/chat.py)                       │
+├───────────┬───────────┬───────────┬───────────┬────────────────┤
+│ StarMirror│MemoryGate │Scripture  │Personality│  Security      │
+│   (LLM)   │(Knowledge)│  (RAG)    │  (Agent)  │  (Crypto)      │
+├───────────┼───────────┼───────────┼───────────┼────────────────┤
+│FileSystem │  Shell    │  Browser  │ SubAgent  │  Metadata      │
+│  (Files)  │(Commands) │   (Web)   │ (Workers) │  (Routing)     │
+├───────────┴───────────┴───────────┴───────────┴────────────────┤
+│                    Shared Utilities                             │
+│         (cathedral/shared: logging, config, db, paths)          │
+├─────────────────────────────────────────────────────────────────┤
+│                       Database Layer                            │
+│           PostgreSQL + pgvector  |  SQLite + FAISS              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Data Flow
+
+```
+User Input
+    │
+    ├─ Slash Command? ──► Command Router ──► Gate Operations
+    │
+    └─ Regular Message:
+        │
+        ├─ 1. Append to Loom (conversation memory)
+        │
+        ├─ 2. Build Context:
+        │     ├─ Conversation history
+        │     ├─ Memory injection (MemoryGate)
+        │     └─ RAG context (ScriptureGate)
+        │
+        ├─ 3. Apply Personality (system prompt, model)
+        │
+        ├─ 4. Call StarMirror (LLM)
+        │     └─ Stream tokens ──► SSE ──► Client
+        │
+        ├─ 5. Store Response in Loom
+        │
+        └─ 6. Post-Processing:
+              ├─ Auto-extract memory
+              └─ Emit completion events
+```
+
+### Project Structure
 
 ```
 Cathedral/
-├── altar/              # FastAPI server
-│   ├── run.py          # Main entry point
-│   ├── templates/      # Jinja2 templates
-│   └── static/         # Static assets
-├── cathedral/          # Core subsystems
-│   ├── StarMirror/     # LLM interface
-│   ├── MemoryGate/     # Knowledge system
-│   ├── ScriptureGate/  # Document library
-│   ├── PersonalityGate/# Personality management
-│   ├── SecurityManager/# Encryption
-│   ├── FileSystemGate/ # File access
-│   ├── ShellGate/      # Command execution
-│   ├── BrowserGate/    # Web access
-│   ├── SubAgentGate/   # Worker agents
-│   ├── MetadataChannel/# Metadata routing
-│   └── Config/         # Configuration
-├── loom/               # Conversation memory
-│   ├── models.py       # Database models
-│   ├── db.py           # Database connection
-│   └── embeddings.py   # Embedding generation
-├── data/               # Runtime data
-│   ├── config.json     # Persistent config
-│   ├── scripture/      # Stored documents
-│   └── agents/         # Agent data
-└── models/             # Local models
-    └── memory/         # TinyLlama for summarization
+├── altar/                    # FastAPI server
+│   ├── run.py                # Application entry point
+│   ├── lifecycle.py          # Startup/shutdown handlers
+│   ├── api/                  # REST API routers
+│   │   ├── chat.py           # Chat endpoints
+│   │   ├── config.py         # Configuration endpoints
+│   │   ├── health.py         # Health check endpoints
+│   │   ├── memory.py         # MemoryGate endpoints
+│   │   ├── scripture.py      # ScriptureGate endpoints
+│   │   ├── personalities.py  # Personality endpoints
+│   │   ├── security.py       # Security endpoints
+│   │   ├── files.py          # FileSystemGate endpoints
+│   │   ├── shell.py          # ShellGate endpoints
+│   │   ├── browser.py        # BrowserGate endpoints
+│   │   ├── subagent.py       # SubAgentGate endpoints
+│   │   └── events.py         # SSE events endpoint
+│   ├── services/             # Event bus, agent tracker
+│   ├── middleware/           # Security middleware
+│   ├── templates/            # Jinja2 HTML templates
+│   └── static/               # CSS, JS, images
+│
+├── cathedral/                # Core subsystems
+│   ├── StarMirror/           # LLM interface
+│   │   ├── router.py         # Multi-backend routing
+│   │   └── providers/        # OpenRouter, Claude CLI, Codex
+│   ├── MemoryGate/           # Knowledge system
+│   │   ├── conversation/     # Loom conversation memory
+│   │   └── discovery.py      # Knowledge discovery
+│   ├── ScriptureGate/        # Document library
+│   │   ├── storage.py        # File storage
+│   │   ├── indexer.py        # Embedding generation
+│   │   └── models.py         # Database models
+│   ├── PersonalityGate/      # Personality management
+│   │   ├── models.py         # Personality schema
+│   │   └── defaults.py       # Built-in personalities
+│   ├── SecurityManager/      # Encryption & auth
+│   │   ├── crypto.py         # AES-256-GCM + Argon2
+│   │   └── session.py        # Session management
+│   ├── FileSystemGate/       # File access control
+│   │   ├── security.py       # Path validation
+│   │   ├── operations.py     # File operations
+│   │   └── backup.py         # Backup management
+│   ├── ShellGate/            # Command execution
+│   │   ├── security.py       # Command validation
+│   │   └── executor.py       # Process execution
+│   ├── BrowserGate/          # Web access
+│   │   ├── providers/        # Search providers
+│   │   ├── fetcher.py        # Page fetching
+│   │   └── websocket_server.py  # Browser extension
+│   ├── SubAgentGate/         # Worker agents
+│   ├── MetadataChannel/      # Metadata routing
+│   ├── Memory/               # Unified memory interface
+│   ├── Config/               # Configuration management
+│   │   └── schema.py         # Config schema definition
+│   ├── commands/             # Slash command router
+│   ├── pipeline/             # Chat processing pipeline
+│   ├── runtime.py            # Lazy-loaded proxies
+│   └── shared/               # Shared utilities
+│       ├── gate.py           # Gate base utilities
+│       ├── db.py             # Database abstraction
+│       └── db_service.py     # DB initialization
+│
+├── data/                     # Runtime data
+│   ├── config.json           # Persistent configuration
+│   ├── personalities/        # Custom personalities
+│   ├── scripture/            # Document storage
+│   ├── agents/               # Sub-agent data
+│   └── backups/              # File backups
+│
+├── models/                   # Local models
+│   └── memory/               # LoomMirror GGUF models
+│
+├── tests/                    # Test suite
+│   ├── conftest.py           # Pytest fixtures
+│   ├── test_*.py             # Unit tests
+│   └── ...
+│
+├── docs/                     # Documentation
+│   └── FEATURES.md           # Complete feature reference
+│
+├── .env.example              # Environment template
+├── requirements.txt          # Python dependencies
+├── requirements-llama.txt    # Local LLM dependencies
+└── pytest.ini                # Pytest configuration
 ```
+
+---
+
+## Technology Stack
+
+| Layer | Technology |
+|-------|------------|
+| **Backend** | FastAPI 0.115+ / Uvicorn |
+| **Database** | PostgreSQL 15+ with pgvector (or SQLite + FAISS) |
+| **ORM** | SQLAlchemy 2.0 (async) |
+| **LLM API** | OpenRouter (40+ models) |
+| **Local LLM** | llama-cpp-python (TinyLlama 1.1B for summarization) |
+| **Embeddings** | OpenAI text-embedding-3-small (1536 dim) |
+| **Encryption** | AES-256-GCM + Argon2id (via cryptography lib) |
+| **Events** | Server-Sent Events (SSE) |
+| **Frontend** | Jinja2 templates + vanilla JS |
+| **Search** | DuckDuckGo / SearXNG / Brave |
+
+---
 
 ## Development
 
@@ -252,41 +588,221 @@ Cathedral/
 # With auto-reload
 uvicorn altar.run:app --reload --port 8000
 
-# Or directly
-python -m altar.run
+# With debug logging
+DEBUG=true LOG_LEVEL=DEBUG python -m altar.run
 ```
 
 ### Running Tests
 
 ```bash
+# All tests
 pytest tests/
+
+# With coverage
+pytest tests/ --cov=cathedral --cov-report=html
+
+# Specific test file
+pytest tests/test_filesystemgate.py -v
+
+# Skip slow/network tests
+pytest tests/ -m "not slow and not network"
+```
+
+### Code Quality
+
+```bash
+# Type checking
+mypy cathedral/
+
+# Linting
+ruff check cathedral/
+
+# Formatting
+ruff format cathedral/
 ```
 
 ### Database Migrations
 
-Cathedral uses auto-migration on startup by default. To disable:
+Cathedral uses auto-migration by default. Tables are created on startup.
 
-```
+```bash
+# Disable auto-migration
 AUTO_MIGRATE_ON_STARTUP=false
+
+# Manual migration (if needed)
+python -c "from cathedral.shared.db_service import init_db; init_db('your-url')"
 ```
+
+### Adding a New Gate
+
+1. Create module in `cathedral/NewGate/`
+2. Implement `__init__.py` with:
+   - `initialize()` function
+   - `is_healthy()` health check
+   - `get_health_status()` detailed status
+   - `__all__` exports
+3. Add to `cathedral/__init__.py` exports
+4. Initialize in `altar/lifecycle.py`
+5. Create API router in `altar/api/newgate.py`
+6. Add router to `altar/run.py`
+7. Add tests in `tests/test_newgate.py`
+
+---
+
+## Deployment
+
+### Docker (Coming Soon)
+
+```dockerfile
+# Dockerfile example
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+EXPOSE 8000
+CMD ["python", "-m", "altar.run"]
+```
+
+### Production Checklist
+
+- [ ] Use PostgreSQL (not SQLite) for production
+- [ ] Set `DEBUG=false`
+- [ ] Configure `ALLOWED_ORIGINS` for CORS
+- [ ] Use environment variables for secrets (not `.env`)
+- [ ] Enable HTTPS via reverse proxy (nginx/caddy)
+- [ ] Set up database backups
+- [ ] Monitor with `/api/health` endpoint
+- [ ] Configure log aggregation
+
+### Reverse Proxy (nginx example)
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name cathedral.example.com;
+
+    ssl_certificate /path/to/cert.pem;
+    ssl_certificate_key /path/to/key.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+
+        # SSE support
+        proxy_buffering off;
+        proxy_cache off;
+    }
+}
+```
+
+---
+
+## Troubleshooting
+
+### Common Issues
+
+#### "pgvector extension not found"
+
+```sql
+-- Connect to your database and run:
+CREATE EXTENSION vector;
+```
+
+Or set `AUTO_CREATE_EXTENSIONS=true` in your environment.
+
+#### "Module not found: cathedral"
+
+Ensure you're running from the project root:
+
+```bash
+cd /path/to/Cathedral
+python -m altar.run
+```
+
+#### "OpenRouter API error"
+
+1. Check your `OPENROUTER_API_KEY` is valid
+2. Verify the model name is correct (e.g., `openai/gpt-4o`)
+3. Check your OpenRouter account has credits
+
+#### "Embedding generation failed"
+
+1. Check your `OPENAI_API_KEY` is valid
+2. Ensure the embedding model exists (`text-embedding-3-small`)
+3. Check OpenAI API status
+
+#### "Database connection failed"
+
+1. Verify PostgreSQL is running
+2. Check `DATABASE_URL` format: `postgresql://user:pass@host:port/dbname`
+3. Ensure the database exists and user has permissions
+
+#### "SQLite async error"
+
+Install aiosqlite:
+
+```bash
+pip install aiosqlite
+```
+
+### Getting Help
+
+1. Check the [docs/FEATURES.md](docs/FEATURES.md) for complete API reference
+2. Review server logs (`LOG_LEVEL=DEBUG` for verbose output)
+3. Check `/api/health` for system status
+4. Open an issue on GitHub
+
+---
 
 ## Security Considerations
 
-- **Never expose Cathedral directly to the internet** - It's designed for local use
-- **Use strong master passwords** - Argon2id provides good protection but weak passwords are still weak
-- **Review shell commands** - ShellGate validates commands but review the blocklist
-- **Manage folder permissions** - Only grant read_write to folders that need it
-- **Keep API keys secure** - Use environment variables, not config files
+- **Local deployment only** - Cathedral is designed for local/private use
+- **Use strong passwords** - Argon2id is secure, but weak passwords aren't
+- **Review shell commands** - Check the ShellGate blocklist configuration
+- **Limit folder access** - Only grant `read_write` to necessary folders
+- **Protect API keys** - Use environment variables, not config files
+- **Network isolation** - Use firewall rules if exposed on network
+- **Regular backups** - Enable FileSystemGate auto-backup feature
+
+---
 
 ## Contributing
 
 Contributions are welcome! Please:
 
 1. Fork the repository
-2. Create a feature branch
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
 3. Make your changes
-4. Submit a pull request
+4. Add tests for new functionality
+5. Ensure tests pass (`pytest tests/`)
+6. Commit your changes (`git commit -m 'Add amazing feature'`)
+7. Push to the branch (`git push origin feature/amazing-feature`)
+8. Open a Pull Request
+
+### Development Guidelines
+
+- Follow existing code patterns
+- Add docstrings to public functions
+- Include `__all__` exports in modules
+- Write tests for new features
+- Update documentation as needed
+
+---
 
 ## License
 
 MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## Acknowledgments
+
+- [FastAPI](https://fastapi.tiangolo.com/) - Modern Python web framework
+- [OpenRouter](https://openrouter.ai/) - LLM API aggregator
+- [pgvector](https://github.com/pgvector/pgvector) - Vector similarity for PostgreSQL
+- [llama.cpp](https://github.com/ggerganov/llama.cpp) - Local LLM inference
