@@ -9,6 +9,8 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
+from fastapi.requests import Request
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 
@@ -18,13 +20,20 @@ class ToolPromptUpdate(BaseModel):
     acknowledge_risk: bool = False
 
 
-def create_router() -> APIRouter:
+def create_router(templates=None) -> APIRouter:
     """Create the ToolGate API router."""
     from cathedral import ToolGate
 
-    router = APIRouter(prefix="/api/toolgate", tags=["toolgate"])
+    router = APIRouter(tags=["toolgate"])
 
-    @router.get("/prompt")
+    # UI Page
+    if templates:
+        @router.get("/toolgate", response_class=HTMLResponse)
+        async def toolgate_page(request: Request):
+            """Serve the Tool Protocol editor UI."""
+            return templates.TemplateResponse("toolgate.html", {"request": request})
+
+    @router.get("/api/toolgate/prompt")
     async def get_tool_prompt_config():
         """
         Get the current tool protocol prompt configuration.
@@ -41,7 +50,7 @@ def create_router() -> APIRouter:
         ToolGate.initialize()
         return ToolGate.get_prompt_config()
 
-    @router.get("/prompt/default")
+    @router.get("/api/toolgate/prompt/default")
     async def get_default_prompt():
         """Get the default tool protocol prompt (for reference/comparison)."""
         from cathedral.ToolGate import DEFAULT_TOOL_PROTOCOL_PROMPT, PROMPT_VERSION
@@ -51,7 +60,7 @@ def create_router() -> APIRouter:
             "version": PROMPT_VERSION,
         }
 
-    @router.get("/prompt/warning")
+    @router.get("/api/toolgate/prompt/warning")
     async def get_edit_warning():
         """
         Get the warning message to display before editing the prompt.
@@ -71,7 +80,7 @@ def create_router() -> APIRouter:
             ],
         }
 
-    @router.post("/prompt")
+    @router.post("/api/toolgate/prompt")
     async def update_tool_prompt(request: ToolPromptUpdate):
         """
         Update the tool protocol prompt.
@@ -97,7 +106,7 @@ def create_router() -> APIRouter:
 
         return {"status": "saved", "message": message}
 
-    @router.post("/prompt/restore")
+    @router.post("/api/toolgate/prompt/restore")
     async def restore_default_prompt():
         """
         Restore the default tool protocol prompt.
@@ -113,7 +122,7 @@ def create_router() -> APIRouter:
 
         return {"status": "restored", "message": message}
 
-    @router.get("/prompt/validate")
+    @router.get("/api/toolgate/prompt/validate")
     async def validate_prompt(prompt: str):
         """
         Validate a prompt without saving it.
@@ -136,7 +145,7 @@ def create_router() -> APIRouter:
             "functional": is_prompt_functional(prompt),
         }
 
-    @router.get("/tools")
+    @router.get("/api/toolgate/tools")
     async def list_available_tools(policy: Optional[str] = None):
         """
         List available tools, optionally filtered by policy class.
@@ -182,7 +191,7 @@ def create_router() -> APIRouter:
             "count": len(tools),
         }
 
-    @router.get("/status")
+    @router.get("/api/toolgate/status")
     async def get_toolgate_status():
         """Get ToolGate health and status information."""
         ToolGate.initialize()

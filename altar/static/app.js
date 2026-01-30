@@ -6,7 +6,8 @@ const state = {
     isStreaming: false,
     consoleCollapsed: false,
     consoleLineCount: 0,
-    maxConsoleLines: 200
+    maxConsoleLines: 200,
+    toolsEnabled: false
 };
 
 // Event source and connection state
@@ -33,7 +34,10 @@ const elements = {
     consoleToggle: document.getElementById('consoleToggle'),
     // Status indicators
     connectionStatus: document.getElementById('connectionStatus'),
-    connectionText: document.getElementById('connectionText')
+    connectionText: document.getElementById('connectionText'),
+    // Tools
+    toolsToggle: document.getElementById('toolsToggle'),
+    toolsLabel: document.getElementById('toolsLabel')
 };
 
 // ========== Thread Management ==========
@@ -198,6 +202,74 @@ function scrollToBottom() {
     elements.messagesContainer.scrollTop = elements.messagesContainer.scrollHeight;
 }
 
+// ========== Tool Execution Display ==========
+
+function appendToolExecution(toolName, args, status = 'calling') {
+    const div = document.createElement('div');
+    div.className = 'flex justify-start message-enter';
+    div.dataset.toolExecution = 'true';
+
+    const statusBadge = status === 'calling'
+        ? '<span class="tool-call-badge px-2 py-0.5 rounded text-xs font-medium">Calling...</span>'
+        : status === 'success'
+        ? '<span class="tool-result-badge px-2 py-0.5 rounded text-xs font-medium">Success</span>'
+        : '<span class="tool-error-badge px-2 py-0.5 rounded text-xs font-medium">Failed</span>';
+
+    const argsDisplay = args && Object.keys(args).length > 0
+        ? `<div class="mt-2 text-xs text-emerald-300/70 mono">
+             ${Object.entries(args).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(', ')}
+           </div>`
+        : '';
+
+    div.innerHTML = `
+        <div class="max-w-2xl px-4 py-3 rounded-2xl tool-execution">
+            <div class="flex items-center justify-between mb-1">
+                <div class="flex items-center gap-2">
+                    <span class="text-emerald-400">&#128295;</span>
+                    <span class="text-xs font-medium text-emerald-300">Tool Execution</span>
+                </div>
+                ${statusBadge}
+            </div>
+            <div class="mono text-sm text-emerald-200">${escapeHtml(toolName)}</div>
+            ${argsDisplay}
+        </div>
+    `;
+
+    elements.messagesList.appendChild(div);
+    scrollToBottom();
+    return div;
+}
+
+function appendToolResult(toolName, result, success = true) {
+    const div = document.createElement('div');
+    div.className = 'flex justify-start message-enter';
+    div.dataset.toolResult = 'true';
+
+    const badge = success
+        ? '<span class="tool-result-badge px-2 py-0.5 rounded text-xs font-medium">Result</span>'
+        : '<span class="tool-error-badge px-2 py-0.5 rounded text-xs font-medium">Error</span>';
+
+    const resultText = typeof result === 'object' ? JSON.stringify(result, null, 2) : result;
+    const truncated = resultText.length > 500 ? resultText.slice(0, 500) + '...' : resultText;
+
+    div.innerHTML = `
+        <div class="max-w-2xl px-4 py-3 rounded-2xl tool-execution">
+            <div class="flex items-center justify-between mb-1">
+                <div class="flex items-center gap-2">
+                    <span class="text-emerald-400">&#128295;</span>
+                    <span class="text-xs font-medium text-emerald-300">${escapeHtml(toolName)}</span>
+                </div>
+                ${badge}
+            </div>
+            <pre class="mono text-xs text-emerald-200/80 whitespace-pre-wrap max-h-32 overflow-y-auto">${escapeHtml(truncated)}</pre>
+        </div>
+    `;
+
+    elements.messagesList.appendChild(div);
+    scrollToBottom();
+    return div;
+}
+
 // ========== Chat & Streaming ==========
 
 async function sendMessage() {
@@ -234,9 +306,15 @@ async function sendMessage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 user_input: text,
-                thread_uid: state.currentThreadUid
+                thread_uid: state.currentThreadUid,
+                enable_tools: state.toolsEnabled
             })
         });
+
+        // Log if tools enabled
+        if (state.toolsEnabled) {
+            Console.tool('Tool calling enabled for this request');
+        }
 
         if (!response.ok) {
             // Check if locked
@@ -401,7 +479,8 @@ const Console = {
     agent: (id, msg) => consolePrint(msg, 'agent', `agent:${id}`),
     memory: (msg) => consolePrint(msg, 'memory', 'memory'),
     security: (msg) => consolePrint(msg, 'security', 'security'),
-    system: (msg) => consolePrint(msg, 'info', 'system')
+    system: (msg) => consolePrint(msg, 'info', 'system'),
+    tool: (msg) => consolePrint(msg, 'tool', 'tool')
 };
 
 // Make Console globally accessible
@@ -454,6 +533,25 @@ function connectEventSource() {
         Console.system(data.message);
     });
 
+    eventSource.addEventListener('tool', (e) => {
+        const data = JSON.parse(e.data);
+        Console.tool(data.message);
+
+        // Render tool execution inline during streaming
+        if (state.isStreaming && state.toolsEnabled) {
+            // Parse tool event message for display
+            const msg = data.message || '';
+            if (msg.includes('Executing')) {
+                // Extract tool name if possible
+                const match = msg.match(/Executing (\S+)/);
+                const toolName = match ? match[1] : 'Tool';
+                appendToolExecution(toolName, null, 'calling');
+            } else if (msg.includes('Malformed')) {
+                appendToolExecution('JSON Parse Error', null, 'error');
+            }
+        }
+    });
+
     // Ignore ping events (keepalive)
     eventSource.addEventListener('ping', () => {});
 }
@@ -485,6 +583,18 @@ elements.newThreadBtn.addEventListener('click', createNewThread);
 elements.sendBtn.addEventListener('click', sendMessage);
 elements.messageInput.addEventListener('keydown', handleKeyDown);
 elements.messageInput.addEventListener('input', autoResizeTextarea);
+
+// Tools toggle
+if (elements.toolsToggle) {
+    elements.toolsToggle.addEventListener('change', (e) => {
+        state.toolsEnabled = e.target.checked;
+        if (elements.toolsLabel) {
+            elements.toolsLabel.textContent = state.toolsEnabled ? 'Tools ON' : 'Tools';
+            elements.toolsLabel.className = state.toolsEnabled ? 'text-emerald-400 font-medium' : '';
+        }
+        Console.tool(state.toolsEnabled ? 'Tool calling enabled' : 'Tool calling disabled');
+    });
+}
 
 // ========== Initialize ==========
 

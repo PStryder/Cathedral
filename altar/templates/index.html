@@ -123,6 +123,25 @@
         .console-line.agent { color: #a78bfa; }
         .console-line.memory { color: #60a5fa; }
         .console-line.security { color: #f472b6; }
+        .console-line.tool { color: #34d399; }
+
+        /* Tool execution inline display */
+        .tool-execution {
+            background: linear-gradient(135deg, #064e3b 0%, #022c22 100%);
+            border: 1px solid #059669;
+        }
+        .tool-call-badge {
+            background: #059669;
+            color: #d1fae5;
+        }
+        .tool-result-badge {
+            background: #047857;
+            color: #a7f3d0;
+        }
+        .tool-error-badge {
+            background: #dc2626;
+            color: #fecaca;
+        }
     </style>
 </head>
 <body class="bg-cathedral-bg text-cathedral-text h-screen overflow-hidden">
@@ -165,6 +184,7 @@
                         <a href="/security" class="hover:text-cathedral-text" title="Security">&#128274;</a>
                         <a href="/config" class="hover:text-cathedral-text" title="Settings">&#9881;</a>
                         <a href="/personalities" class="hover:text-cathedral-text" title="Personalities">&#129302;</a>
+                        <a href="/toolgate" class="hover:text-cathedral-text" title="Tool Protocol">&#128295;</a>
                     </div>
                 </div>
             </div>
@@ -218,8 +238,19 @@
                             </svg>
                         </button>
                     </div>
-                    <div class="flex justify-between mt-2 text-xs text-cathedral-muted">
-                        <span>Commands: /search, /remember, /lock, /security, /personality, /spawn, /agents</span>
+                    <div class="flex justify-between items-center mt-2 text-xs text-cathedral-muted">
+                        <div class="flex items-center gap-4">
+                            <span>Commands: /search, /remember, /lock, /spawn</span>
+                            <!-- Tools Toggle -->
+                            <label class="flex items-center gap-2 cursor-pointer select-none">
+                                <input type="checkbox" id="toolsToggle"
+                                       class="w-4 h-4 rounded border-gray-600 bg-gray-700 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-0">
+                                <span class="flex items-center gap-1">
+                                    <span class="text-emerald-400">&#128295;</span>
+                                    <span id="toolsLabel">Tools</span>
+                                </span>
+                            </label>
+                        </div>
                         <span id="streamingStatus" class="hidden">
                             <span class="inline-flex gap-1">
                                 <span class="typing-dot w-1.5 h-1.5 bg-cathedral-accent rounded-full"></span>

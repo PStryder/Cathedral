@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cathedral - Tool Protocol</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .prompt-textarea {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .danger-border { border-color: #dc2626; box-shadow: 0 0 0 1px #dc2626; }
+        .modal-overlay {
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(4px);
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-5xl">
+        <!-- Header -->
+        <div class="flex justify-between items-center mb-8">
+            <div>
+                <h1 class="text-3xl font-bold text-purple-400">Tool Protocol</h1>
+                <p class="text-gray-400 mt-1">System prompt that teaches the model how to call Cathedral tools</p>
+            </div>
+            <a href="/" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-white">Back to Chat</a>
+        </div>
+
+        <!-- Status Card -->
+        <div id="status-card" class="mb-6 p-4 rounded-lg border border-gray-700 bg-gray-800">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <span id="status-icon" class="text-2xl">-</span>
+                    <div>
+                        <div id="status-text" class="font-medium">Loading...</div>
+                        <div id="status-detail" class="text-sm text-gray-400"></div>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span id="version-badge" class="px-2 py-1 bg-gray-700 rounded text-xs mono">-</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Prompt Editor Section -->
+        <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+            <!-- Section Header -->
+            <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700 bg-gray-800/50">
+                <h2 class="font-semibold">Tool Protocol System Prompt</h2>
+                <div class="flex gap-2">
+                    <button id="edit-btn" onclick="enterEditMode()"
+                            class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-sm">
+                        Edit
+                    </button>
+                    <button id="restore-btn" onclick="confirmRestore()"
+                            class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-sm">
+                        Restore Default
+                    </button>
+                </div>
+            </div>
+
+            <!-- Prompt Display (Read-only) -->
+            <div id="prompt-view" class="p-4">
+                <pre id="prompt-content" class="prompt-textarea whitespace-pre-wrap text-gray-300 bg-gray-900 p-4 rounded border border-gray-700 max-h-96 overflow-y-auto">Loading...</pre>
+            </div>
+
+            <!-- Prompt Editor (Hidden by default) -->
+            <div id="prompt-edit" class="p-4 hidden">
+                <textarea id="prompt-editor"
+                          class="prompt-textarea w-full h-96 bg-gray-900 text-gray-300 p-4 rounded border border-gray-700 focus:outline-none focus:border-purple-500 resize-none"
+                          placeholder="Enter tool protocol prompt..."></textarea>
+
+                <!-- Validation Status -->
+                <div id="validation-status" class="mt-3 p-3 rounded bg-gray-900 border border-gray-700 hidden">
+                    <div class="flex items-center gap-2">
+                        <span id="validation-icon"></span>
+                        <span id="validation-text"></span>
+                    </div>
+                    <ul id="missing-markers" class="mt-2 text-sm text-red-400 list-disc list-inside hidden"></ul>
+                </div>
+
+                <!-- Edit Actions -->
+                <div class="flex gap-3 mt-4">
+                    <button onclick="savePrompt()"
+                            class="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded font-medium">
+                        Save Changes
+                    </button>
+                    <button onclick="cancelEdit()"
+                            class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded">
+                        Cancel
+                    </button>
+                    <button onclick="validatePrompt()"
+                            class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded">
+                        Validate
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Available Tools Section -->
+        <div class="mt-8 bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+            <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700 bg-gray-800/50">
+                <h2 class="font-semibold">Available Tools</h2>
+                <div class="flex gap-2">
+                    <select id="policy-filter" onchange="loadTools()"
+                            class="px-3 py-1.5 bg-gray-700 border border-gray-600 rounded text-sm">
+                        <option value="">All Policies</option>
+                        <option value="read_only">Read Only</option>
+                        <option value="write">Write</option>
+                        <option value="destructive">Destructive</option>
+                        <option value="privileged">Privileged</option>
+                        <option value="network">Network</option>
+                    </select>
+                </div>
+            </div>
+            <div id="tools-list" class="p-4 max-h-96 overflow-y-auto">
+                <div class="text-gray-400">Loading tools...</div>
+            </div>
+            <div class="px-4 py-2 border-t border-gray-700 bg-gray-800/50 text-sm text-gray-400">
+                <span id="tools-count">0</span> tools available
+            </div>
+        </div>
+    </div>
+
+    <!-- Warning Modal -->
+    <div id="warning-modal" class="fixed inset-0 modal-overlay z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-gray-800 rounded-lg border-2 border-red-600 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <!-- Modal Header -->
+            <div class="px-6 py-4 border-b border-red-600 bg-red-900/30">
+                <h3 class="text-xl font-bold text-red-400 flex items-center gap-2">
+                    <span class="text-2xl">&#9888;</span>
+                    DANGER: Tool Protocol Prompt
+                </h3>
+            </div>
+            <!-- Modal Body -->
+            <div class="px-6 py-4">
+                <pre id="warning-text" class="mono text-sm whitespace-pre-wrap text-gray-300 bg-gray-900 p-4 rounded border border-gray-700"></pre>
+            </div>
+            <!-- Modal Footer -->
+            <div class="px-6 py-4 border-t border-gray-700 flex justify-end gap-3">
+                <button onclick="closeWarningModal()"
+                        class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded">
+                    Cancel
+                </button>
+                <button onclick="acknowledgeWarning()"
+                        class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded font-medium">
+                    I Understand the Risks
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Restore Confirm Modal -->
+    <div id="restore-modal" class="fixed inset-0 modal-overlay z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-gray-800 rounded-lg border border-gray-600 max-w-md w-full">
+            <div class="px-6 py-4 border-b border-gray-700">
+                <h3 class="text-lg font-semibold">Restore Default Prompt?</h3>
+            </div>
+            <div class="px-6 py-4 text-gray-300">
+                This will replace the current prompt with the default version. Any custom changes will be lost.
+            </div>
+            <div class="px-6 py-4 border-t border-gray-700 flex justify-end gap-3">
+                <button onclick="closeRestoreModal()"
+                        class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded">
+                    Cancel
+                </button>
+                <button onclick="restoreDefault()"
+                        class="px-4 py-2 bg-green-600 hover:bg-green-700 rounded font-medium">
+                    Restore Default
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg hidden transition-all transform translate-y-2 opacity-0">
+        <span id="toast-message"></span>
+    </div>
+
+    <script>
+        let currentPrompt = '';
+        let isCustom = false;
+        let warningAcknowledged = false;
+        let warningText = '';
+
+        async function loadPromptConfig() {
+            try {
+                const res = await fetch('/api/toolgate/prompt');
+                const config = await res.json();
+
+                currentPrompt = config.prompt;
+                isCustom = config.is_custom;
+
+                document.getElementById('prompt-content').textContent = config.prompt;
+                document.getElementById('prompt-editor').value = config.prompt;
+                document.getElementById('version-badge').textContent = config.current_version;
+
+                updateStatus(config);
+            } catch (e) {
+                showToast('Error loading prompt: ' + e.message, 'error');
+            }
+        }
+
+        function updateStatus(config) {
+            const icon = document.getElementById('status-icon');
+            const text = document.getElementById('status-text');
+            const detail = document.getElementById('status-detail');
+            const card = document.getElementById('status-card');
+
+            card.classList.remove('border-green-600', 'border-yellow-600', 'border-red-600');
+
+            if (config.is_using_fallback) {
+                icon.textContent = '!';
+                icon.className = 'text-2xl text-red-400';
+                text.textContent = 'Using Fallback Prompt';
+                text.className = 'font-medium text-red-400';
+                detail.textContent = 'Custom prompt is broken - using default';
+                card.classList.add('border-red-600');
+            } else if (config.is_custom) {
+                icon.textContent = '*';
+                icon.className = 'text-2xl text-yellow-400';
+                text.textContent = 'Custom Prompt Active';
+                text.className = 'font-medium text-yellow-400';
+                detail.textContent = 'Created: ' + (config.custom_created_at || 'Unknown');
+                card.classList.add('border-yellow-600');
+            } else {
+                icon.textContent = '✓';
+                icon.className = 'text-2xl text-green-400';
+                text.textContent = 'Default Prompt';
+                text.className = 'font-medium text-green-400';
+                detail.textContent = 'Using official tool protocol';
+                card.classList.add('border-green-600');
+            }
+        }
+
+        async function loadWarning() {
+            try {
+                const res = await fetch('/api/toolgate/prompt/warning');
+                const data = await res.json();
+                warningText = data.warning;
+            } catch (e) {
+                warningText = 'WARNING: Editing this prompt may break tool calling.';
+            }
+        }
+
+        async function loadTools() {
+            const filter = document.getElementById('policy-filter').value;
+            const url = filter ? `/api/toolgate/tools?policy=${filter}` : '/api/toolgate/tools';
+
+            try {
+                const res = await fetch(url);
+                const data = await res.json();
+
+                renderTools(data.tools);
+                document.getElementById('tools-count').textContent = data.count;
+            } catch (e) {
+                document.getElementById('tools-list').innerHTML =
+                    `<div class="text-red-400">Error loading tools: ${e.message}</div>`;
+            }
+        }
+
+        function renderTools(tools) {
+            const container = document.getElementById('tools-list');
+
+            if (tools.length === 0) {
+                container.innerHTML = '<div class="text-gray-400">No tools match the filter</div>';
+                return;
+            }
+
+            const policyColors = {
+                read_only: 'bg-green-900/50 text-green-400 border-green-700',
+                write: 'bg-blue-900/50 text-blue-400 border-blue-700',
+                destructive: 'bg-red-900/50 text-red-400 border-red-700',
+                privileged: 'bg-purple-900/50 text-purple-400 border-purple-700',
+                network: 'bg-yellow-900/50 text-yellow-400 border-yellow-700'
+            };
+
+            container.innerHTML = tools.map(tool => `
+                <div class="mb-3 p-3 bg-gray-900 rounded border border-gray-700">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="mono font-medium text-purple-300">${tool.name}</span>
+                        <span class="px-2 py-0.5 text-xs rounded border ${policyColors[tool.policy_class] || 'bg-gray-700 text-gray-300 border-gray-600'}">
+                            ${tool.policy_class}
+                        </span>
+                    </div>
+                    <div class="text-sm text-gray-400">${tool.description}</div>
+                    ${Object.keys(tool.args).length > 0 ? `
+                        <div class="mt-2 text-xs text-gray-500">
+                            Args: ${Object.entries(tool.args).map(([name, schema]) =>
+                                `<span class="mono">${name}</span>${schema.required ? '*' : ''}`
+                            ).join(', ')}
+                        </div>
+                    ` : ''}
+                </div>
+            `).join('');
+        }
+
+        function enterEditMode() {
+            if (!warningAcknowledged) {
+                document.getElementById('warning-text').textContent = warningText;
+                document.getElementById('warning-modal').classList.remove('hidden');
+                return;
+            }
+
+            document.getElementById('prompt-view').classList.add('hidden');
+            document.getElementById('prompt-edit').classList.remove('hidden');
+            document.getElementById('prompt-editor').value = currentPrompt;
+        }
+
+        function cancelEdit() {
+            document.getElementById('prompt-view').classList.remove('hidden');
+            document.getElementById('prompt-edit').classList.add('hidden');
+            document.getElementById('validation-status').classList.add('hidden');
+        }
+
+        function closeWarningModal() {
+            document.getElementById('warning-modal').classList.add('hidden');
+        }
+
+        function acknowledgeWarning() {
+            warningAcknowledged = true;
+            closeWarningModal();
+            enterEditMode();
+        }
+
+        async function validatePrompt() {
+            const prompt = document.getElementById('prompt-editor').value;
+            const statusDiv = document.getElementById('validation-status');
+            const icon = document.getElementById('validation-icon');
+            const text = document.getElementById('validation-text');
+            const markersList = document.getElementById('missing-markers');
+
+            try {
+                const res = await fetch(`/api/toolgate/prompt/validate?prompt=${encodeURIComponent(prompt)}`);
+                const data = await res.json();
+
+                statusDiv.classList.remove('hidden', 'border-green-700', 'border-red-700');
+                markersList.classList.add('hidden');
+
+                if (data.valid) {
+                    statusDiv.classList.add('border-green-700');
+                    icon.textContent = '✓';
+                    icon.className = 'text-green-400';
+                    text.textContent = 'Prompt is valid - all required markers present';
+                    text.className = 'text-green-400';
+                } else {
+                    statusDiv.classList.add('border-red-700');
+                    icon.textContent = '✗';
+                    icon.className = 'text-red-400';
+                    text.textContent = 'Prompt is invalid - missing required markers';
+                    text.className = 'text-red-400';
+
+                    markersList.classList.remove('hidden');
+                    markersList.innerHTML = data.missing.map(m => `<li>${m}</li>`).join('');
+                }
+            } catch (e) {
+                showToast('Validation error: ' + e.message, 'error');
+            }
+        }
+
+        async function savePrompt() {
+            const prompt = document.getElementById('prompt-editor').value;
+
+            try {
+                const res = await fetch('/api/toolgate/prompt', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        acknowledge_risk: true
+                    })
+                });
+
+                if (res.ok) {
+                    showToast('Prompt saved successfully', 'success');
+                    cancelEdit();
+                    loadPromptConfig();
+                } else {
+                    const error = await res.json();
+                    showToast('Error: ' + error.detail, 'error');
+                }
+            } catch (e) {
+                showToast('Save error: ' + e.message, 'error');
+            }
+        }
+
+        function confirmRestore() {
+            document.getElementById('restore-modal').classList.remove('hidden');
+        }
+
+        function closeRestoreModal() {
+            document.getElementById('restore-modal').classList.add('hidden');
+        }
+
+        async function restoreDefault() {
+            try {
+                const res = await fetch('/api/toolgate/prompt/restore', { method: 'POST' });
+
+                if (res.ok) {
+                    showToast('Default prompt restored', 'success');
+                    closeRestoreModal();
+                    warningAcknowledged = false;
+                    loadPromptConfig();
+                } else {
+                    const error = await res.json();
+                    showToast('Error: ' + error.detail, 'error');
+                }
+            } catch (e) {
+                showToast('Restore error: ' + e.message, 'error');
+            }
+        }
+
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            const toastMsg = document.getElementById('toast-message');
+
+            toast.className = 'fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg transition-all transform';
+
+            if (type === 'success') {
+                toast.classList.add('bg-green-800', 'text-green-100');
+            } else if (type === 'error') {
+                toast.classList.add('bg-red-800', 'text-red-100');
+            } else {
+                toast.classList.add('bg-gray-800', 'text-gray-100');
+            }
+
+            toastMsg.textContent = message;
+            toast.classList.remove('hidden', 'translate-y-2', 'opacity-0');
+
+            setTimeout(() => {
+                toast.classList.add('translate-y-2', 'opacity-0');
+                setTimeout(() => toast.classList.add('hidden'), 300);
+            }, 3000);
+        }
+
+        // Initialize
+        loadPromptConfig();
+        loadWarning();
+        loadTools();
+    </script>
+</body>
+</html>
