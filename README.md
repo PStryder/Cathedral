@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**A modular AI assistant platform with persistent memory, semantic search, and system integration.**
+**A memory-augmented chat interface that works with any LLM backend.**
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green.svg)](https://fastapi.tiangolo.com/)
@@ -17,14 +17,25 @@
 
 ## Overview
 
-Cathedral is a self-hosted AI conversation platform that combines:
+Cathedral is a self-hosted chat interface with **automatic context injection** from a persistent knowledge store.
 
-- **Persistent Memory** - Every conversation is stored and semantically searchable
-- **Knowledge Extraction** - Automatically extracts facts, concepts, and patterns from conversations
-- **RAG Integration** - Store documents and inject relevant context into prompts
-- **System Integration** - Secure file access, shell commands, web browsing
-- **Multi-Modal Support** - Image analysis, audio transcription, vision understanding
-- **Modular Architecture** - Enable/disable features via configuration
+The core idea: relevant memories and documents are retrieved and injected into the prompt *before* the LLM sees your message. The agent doesn't need to "decide" to search memory - it just has the context. No tool calls required.
+
+```
+Your message arrives
+    ↓
+Cathedral retrieves relevant memories + documents (semantic search)
+    ↓
+Context is assembled: system prompt → your message → memories → documents → history
+    ↓
+Sent to any LLM backend (OpenRouter, Claude CLI, local models, etc.)
+    ↓
+Response stored, knowledge extracted for future recall
+```
+
+**Works with any LLM provider** - cloud APIs via OpenRouter, local models, or CLI tools. The memory layer sits above your choice of backend.
+
+Beyond the core memory system, Cathedral includes optional capabilities: file access, shell commands, web browsing, tool calling, and multi-modal support. Enable what you need, ignore what you don't.
 
 Built with FastAPI, PostgreSQL + pgvector, and designed for local deployment.
 

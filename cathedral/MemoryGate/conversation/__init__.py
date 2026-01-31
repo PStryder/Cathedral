@@ -590,6 +590,208 @@ class ConversationService:
                 for row in rows
             ]
 
+    async def hybrid_search(
+        self,
+        query: str,
+        thread_uid: str = None,
+        limit: int = 5,
+        include_all_threads: bool = False,
+        fts_weight: float = 0.4,
+        semantic_weight: float = 0.6,
+    ) -> List[Dict]:
+        """
+        Hybrid search combining PostgreSQL full-text search with vector similarity.
+
+        Uses Reciprocal Rank Fusion (RRF) to merge results from both methods.
+        FTS catches keyword matches, semantic catches conceptual similarity.
+
+        Falls back to semantic-only search on non-PostgreSQL backends.
+
+        Args:
+            query: Search query
+            thread_uid: Limit to specific thread (None for active)
+            limit: Maximum results
+            include_all_threads: Search across all threads
+            fts_weight: Weight for full-text search component (default 0.4)
+            semantic_weight: Weight for semantic component (default 0.6)
+
+        Returns:
+            Messages ranked by combined relevance
+        """
+        # Check if we're on PostgreSQL (required for hybrid search)
+        from cathedral.shared import db_service
+        engine = db_service.get_engine()
+        is_postgres = engine.dialect.name == "postgresql"
+
+        if not is_postgres:
+            # Fall back to semantic-only search on non-PostgreSQL
+            return await self.semantic_search(query, thread_uid, limit, include_all_threads)
+
+        if not embeddings_configured():
+            # Fall back to FTS-only if embeddings not configured
+            return await self._fts_search(query, thread_uid, limit, include_all_threads)
+
+        query_embedding = await embed_text(query)
+        if query_embedding is None:
+            return await self._fts_search(query, thread_uid, limit, include_all_threads)
+
+        async with get_async_session() as session:
+            # Hybrid query using RRF scoring
+            # RRF formula: score = Σ (weight / (k + rank))
+            # k=60 is the standard smoothing constant
+
+            if thread_uid and not include_all_threads:
+                sql = text("""
+                    WITH fts_results AS (
+                        SELECT message_uid,
+                               ROW_NUMBER() OVER (ORDER BY ts_rank(search_vector, plainto_tsquery('english', :query)) DESC) as fts_rank
+                        FROM mg_conversation_messages
+                        WHERE thread_uid = :thread_uid
+                          AND search_vector @@ plainto_tsquery('english', :query)
+                        LIMIT :search_limit
+                    ),
+                    semantic_results AS (
+                        SELECT m.message_uid,
+                               ROW_NUMBER() OVER (ORDER BY e.embedding <=> :query_embedding::vector) as sem_rank
+                        FROM mg_conversation_messages m
+                        JOIN mg_conversation_embeddings e ON m.message_uid = e.message_uid
+                        WHERE m.thread_uid = :thread_uid
+                        LIMIT :search_limit
+                    ),
+                    combined AS (
+                        SELECT COALESCE(f.message_uid, s.message_uid) as message_uid,
+                               COALESCE(:fts_weight / (60.0 + f.fts_rank), 0) +
+                               COALESCE(:sem_weight / (60.0 + s.sem_rank), 0) as rrf_score
+                        FROM fts_results f
+                        FULL OUTER JOIN semantic_results s ON f.message_uid = s.message_uid
+                    )
+                    SELECT m.message_uid, m.role, m.content, m.timestamp, m.thread_uid,
+                           c.rrf_score
+                    FROM combined c
+                    JOIN mg_conversation_messages m ON c.message_uid = m.message_uid
+                    ORDER BY c.rrf_score DESC
+                    LIMIT :limit
+                """)
+                result = await session.execute(sql, {
+                    "query": query,
+                    "query_embedding": str(query_embedding),
+                    "thread_uid": thread_uid,
+                    "fts_weight": fts_weight,
+                    "sem_weight": semantic_weight,
+                    "search_limit": limit * 3,  # Get more candidates for fusion
+                    "limit": limit
+                })
+            else:
+                sql = text("""
+                    WITH fts_results AS (
+                        SELECT message_uid,
+                               ROW_NUMBER() OVER (ORDER BY ts_rank(search_vector, plainto_tsquery('english', :query)) DESC) as fts_rank
+                        FROM mg_conversation_messages
+                        WHERE search_vector @@ plainto_tsquery('english', :query)
+                        LIMIT :search_limit
+                    ),
+                    semantic_results AS (
+                        SELECT m.message_uid,
+                               ROW_NUMBER() OVER (ORDER BY e.embedding <=> :query_embedding::vector) as sem_rank
+                        FROM mg_conversation_messages m
+                        JOIN mg_conversation_embeddings e ON m.message_uid = e.message_uid
+                        LIMIT :search_limit
+                    ),
+                    combined AS (
+                        SELECT COALESCE(f.message_uid, s.message_uid) as message_uid,
+                               COALESCE(:fts_weight / (60.0 + f.fts_rank), 0) +
+                               COALESCE(:sem_weight / (60.0 + s.sem_rank), 0) as rrf_score
+                        FROM fts_results f
+                        FULL OUTER JOIN semantic_results s ON f.message_uid = s.message_uid
+                    )
+                    SELECT m.message_uid, m.role, m.content, m.timestamp, m.thread_uid,
+                           c.rrf_score
+                    FROM combined c
+                    JOIN mg_conversation_messages m ON c.message_uid = m.message_uid
+                    ORDER BY c.rrf_score DESC
+                    LIMIT :limit
+                """)
+                result = await session.execute(sql, {
+                    "query": query,
+                    "query_embedding": str(query_embedding),
+                    "fts_weight": fts_weight,
+                    "sem_weight": semantic_weight,
+                    "search_limit": limit * 3,
+                    "limit": limit
+                })
+
+            rows = result.fetchall()
+            return [
+                {
+                    "message_uid": row[0],
+                    "role": row[1],
+                    "content": row[2],
+                    "timestamp": row[3].isoformat() if row[3] else None,
+                    "thread_uid": row[4],
+                    "score": float(row[5]) if row[5] else 0.0,
+                    "search_type": "hybrid"
+                }
+                for row in rows
+            ]
+
+    async def _fts_search(
+        self,
+        query: str,
+        thread_uid: str = None,
+        limit: int = 5,
+        include_all_threads: bool = False
+    ) -> List[Dict]:
+        """Full-text search only fallback (PostgreSQL only)."""
+        # FTS requires PostgreSQL
+        from cathedral.shared import db_service
+        engine = db_service.get_engine()
+        if engine.dialect.name != "postgresql":
+            return []
+
+        async with get_async_session() as session:
+            if thread_uid and not include_all_threads:
+                sql = text("""
+                    SELECT message_uid, role, content, timestamp, thread_uid,
+                           ts_rank(search_vector, plainto_tsquery('english', :query)) as score
+                    FROM mg_conversation_messages
+                    WHERE thread_uid = :thread_uid
+                      AND search_vector @@ plainto_tsquery('english', :query)
+                    ORDER BY score DESC
+                    LIMIT :limit
+                """)
+                result = await session.execute(sql, {
+                    "query": query,
+                    "thread_uid": thread_uid,
+                    "limit": limit
+                })
+            else:
+                sql = text("""
+                    SELECT message_uid, role, content, timestamp, thread_uid,
+                           ts_rank(search_vector, plainto_tsquery('english', :query)) as score
+                    FROM mg_conversation_messages
+                    WHERE search_vector @@ plainto_tsquery('english', :query)
+                    ORDER BY score DESC
+                    LIMIT :limit
+                """)
+                result = await session.execute(sql, {
+                    "query": query,
+                    "limit": limit
+                })
+
+            rows = result.fetchall()
+            return [
+                {
+                    "message_uid": row[0],
+                    "role": row[1],
+                    "content": row[2],
+                    "timestamp": row[3].isoformat() if row[3] else None,
+                    "thread_uid": row[4],
+                    "score": float(row[5]) if row[5] else 0.0,
+                    "search_type": "fts"
+                }
+                for row in rows
+            ]
+
     # ==========================================================================
     # Context Composition
     # ==========================================================================
@@ -601,25 +803,33 @@ class ConversationService:
         preserve_last_n: int = 20,
         include_semantic: bool = True,
         semantic_limit: int = 3,
-        max_tokens: int = 4096
+        max_tokens: int = 4096,
+        use_hybrid_search: bool = True,
+        use_context_gate: bool = True,
+        gate_threshold: float = 0.5,
     ) -> List[Dict]:
         """
         Build enriched context for LLM prompt.
 
         Includes thread history with summarization and optional
-        semantic search results from other conversations.
+        hybrid search results from other conversations.
 
         Args:
-            user_input: Current user input (used for semantic search)
+            user_input: Current user input (used for search)
             thread_uid: Thread to build context for
             preserve_last_n: Number of recent messages to keep verbatim
-            include_semantic: Include semantically similar messages
-            semantic_limit: Max semantic search results
+            include_semantic: Include search results from other conversations
+            semantic_limit: Max search results
             max_tokens: Token budget for context
+            use_hybrid_search: Use hybrid FTS+semantic search (default True)
+            use_context_gate: Use ContextGate heuristics (default True)
+            gate_threshold: ContextGate score threshold (default 0.5)
 
         Returns:
             Message list ready for LLM
         """
+        from cathedral.MemoryGate.context_gate import ContextGate
+
         # Get thread history with summarization
         history = await self.recall_with_summary_async(
             preserve_last_n=preserve_last_n,
@@ -628,25 +838,41 @@ class ConversationService:
 
         result = []
 
-        # Add semantic context if enabled
-        if include_semantic:
-            semantic_results = await self.semantic_search(
-                query=user_input,
-                thread_uid=thread_uid,
-                limit=semantic_limit,
-                include_all_threads=True
-            )
+        # Check if we should include search results
+        should_search = include_semantic
+        if should_search and use_context_gate:
+            should_inject, score, reason = ContextGate.decide(user_input, threshold=gate_threshold)
+            should_search = should_inject
+
+        # Add search context if enabled and gating passed
+        if should_search:
+            if use_hybrid_search:
+                search_results = await self.hybrid_search(
+                    query=user_input,
+                    thread_uid=thread_uid,
+                    limit=semantic_limit,
+                    include_all_threads=True
+                )
+                # Filter by score (RRF scores are typically small, use lower threshold)
+                search_results = [r for r in search_results if r.get("score", 0) > 0.005]
+            else:
+                search_results = await self.semantic_search(
+                    query=user_input,
+                    thread_uid=thread_uid,
+                    limit=semantic_limit,
+                    include_all_threads=True
+                )
+                search_results = [r for r in search_results if r.get("similarity", 0) > 0.5]
 
             summary_results = await self.search_summaries(query=user_input, limit=2)
+            summary_results = [s for s in summary_results if s.get("similarity", 0) > 0.5]
 
             context_lines = []
-            for r in semantic_results:
-                if r.get("similarity", 0) > 0.5:
-                    context_lines.append(f"- [{r['role']}] {r['content'][:200]}")
+            for r in search_results:
+                context_lines.append(f"- [{r['role']}] {r['content'][:200]}")
 
             for s in summary_results:
-                if s.get("similarity", 0) > 0.5:
-                    context_lines.append(f"- [summary] {s['summary_text'][:200]}")
+                context_lines.append(f"- [summary] {s['summary_text'][:200]}")
 
             if context_lines:
                 result.append({

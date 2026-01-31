@@ -33,7 +33,44 @@ def init_conversation_db() -> None:
             conn.commit()
 
     Base.metadata.create_all(bind=engine)
+
+    # Add FTS support for PostgreSQL only (after table creation)
+    if engine.dialect.name == "postgresql":
+        _add_fts_support(engine)
+
     _tables_initialized = True
+
+
+def _add_fts_support(engine) -> None:
+    """
+    Add full-text search support to conversation messages table (PostgreSQL only).
+
+    Creates a generated tsvector column and GIN index for hybrid search.
+    This is done separately from model definition to maintain SQLite compatibility.
+    """
+    with engine.connect() as conn:
+        # Check if column already exists
+        result = conn.execute(text("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'mg_conversation_messages' AND column_name = 'search_vector'
+        """))
+        if result.fetchone() is not None:
+            return  # Column already exists
+
+        # Add generated tsvector column
+        conn.execute(text("""
+            ALTER TABLE mg_conversation_messages
+            ADD COLUMN search_vector tsvector
+            GENERATED ALWAYS AS (to_tsvector('english', content)) STORED
+        """))
+
+        # Create GIN index for fast full-text search
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_mg_messages_search
+            ON mg_conversation_messages USING GIN(search_vector)
+        """))
+
+        conn.commit()
 
 
 def _require_ready() -> None:

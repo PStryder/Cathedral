@@ -1,13 +1,20 @@
 """
 Automatic memory extraction and context injection for Cathedral.
+
+Includes ContextGate for heuristic-based gating of context injection.
 """
 
 from typing import Optional
+
+from cathedral.shared.gate import GateLogger
 from cathedral.MemoryGate import (
     store_observation,
     search,
     is_initialized
 )
+from cathedral.MemoryGate.context_gate import ContextGate
+
+_log = GateLogger.get("MemoryGate.AutoMemory")
 
 
 def extract_from_exchange(
@@ -42,16 +49,42 @@ def extract_from_exchange(
     return result
 
 
-def build_memory_context(user_input: str, limit: int = 3, min_confidence: float = 0.5) -> str:
+def build_memory_context(
+    user_input: str,
+    limit: int = 3,
+    min_confidence: float = 0.5,
+    gate_threshold: float = 0.5,
+    skip_gating: bool = False,
+) -> str:
     """
     Build memory context to inject into the prompt.
+
+    Uses ContextGate heuristics to determine if context injection is needed.
     Searches for semantically relevant memories based on user input.
 
-    Returns formatted string of relevant memories, or empty string if none found.
+    Args:
+        user_input: The user's message
+        limit: Maximum number of memories to include
+        min_confidence: Minimum confidence threshold for memories
+        gate_threshold: ContextGate score threshold (default 0.5)
+        skip_gating: Bypass ContextGate and always search (default False)
+
+    Returns:
+        Formatted string of relevant memories, or empty string if none found
+        or gating determined context not needed.
     """
     if not is_initialized():
         return ""
 
+    # === Context Gating ===
+    if not skip_gating:
+        should_inject, score, reason = ContextGate.decide(user_input, threshold=gate_threshold)
+        if not should_inject:
+            _log.debug(f"Context skipped: {reason} (score={score:.2f})")
+            return ""
+        _log.debug(f"Context search: {reason} (score={score:.2f})")
+
+    # === Memory Search ===
     results = search(
         query=user_input,
         limit=limit,
