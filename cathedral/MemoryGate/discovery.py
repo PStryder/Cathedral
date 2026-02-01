@@ -43,6 +43,7 @@ class DiscoveryConfig:
     """Configuration for knowledge discovery."""
     enabled: bool = True
     min_similarity: float = 0.6
+    min_similarity_cross_thread: float = 0.7  # Higher bar for message→message across threads
     top_k: int = 5
 
     # Background processing
@@ -58,6 +59,14 @@ class DiscoveryConfig:
     fts_weight: float = 0.4
     semantic_weight: float = 0.6
     overlap_boost: float = 1.5  # Multiplier when item appears in both FTS and semantic results
+    rrf_threshold: float = 0.008  # Higher RRF threshold for cross-thread (was 0.005)
+
+    # Profile domain boosting
+    profile_domain_boost: float = 1.3  # Boost for domain='profile' in searches
+
+    # Anchor-based expansion
+    anchor_neighbor_limit: int = 3  # Max neighbors to pull for dual-hit anchors
+    non_anchor_neighbor_limit: int = 1  # Max neighbors for single-hit results
 
 
 @dataclass
@@ -68,6 +77,16 @@ class DiscoveredRelationship:
     rel_type: str
     similarity: float
     discovered_at: datetime
+
+
+@dataclass
+class HybridSearchResult:
+    """Result from hybrid search with anchor metadata."""
+    message_uid: str
+    score: float
+    is_anchor: bool  # True if item appeared in both FTS and semantic results
+    fts_rank: Optional[int] = None
+    semantic_rank: Optional[int] = None
 
 
 class KnowledgeDiscoveryService:
@@ -289,11 +308,10 @@ class KnowledgeDiscoveryService:
             for other_uid, score in message_results:
                 # For hybrid search, scores are RRF-based (typically 0.005-0.02 range)
                 # For vector search, scores are similarity (0-1 range)
-                # Use appropriate threshold based on method
+                # Use higher threshold for cross-thread message links
                 if discovery_method == "hybrid_rrf":
-                    # RRF scores: higher is better, but values are small
-                    # A score > 0.005 indicates reasonable relevance
-                    if score >= 0.005:
+                    # RRF threshold from config (default 0.008)
+                    if score >= self.config.rrf_threshold:
                         relationships.append(DiscoveredRelationship(
                             from_ref=message_ref,
                             to_ref=f"message:{other_uid}",
@@ -302,8 +320,8 @@ class KnowledgeDiscoveryService:
                             discovered_at=datetime.utcnow()
                         ))
                 else:
-                    # Vector similarity: use configured threshold
-                    if score >= self.config.min_similarity:
+                    # Vector similarity: use higher cross-thread threshold
+                    if score >= self.config.min_similarity_cross_thread:
                         relationships.append(DiscoveredRelationship(
                             from_ref=message_ref,
                             to_ref=f"message:{other_uid}",
@@ -399,8 +417,9 @@ class KnowledgeDiscoveryService:
 
             for other_uid, score in message_results:
                 # Apply appropriate threshold based on search method
+                # Use higher threshold for cross-thread links
                 if discovery_method == "hybrid_rrf":
-                    if score >= 0.005:
+                    if score >= self.config.rrf_threshold:
                         relationships.append(DiscoveredRelationship(
                             from_ref=thread_ref,
                             to_ref=f"message:{other_uid}",
@@ -409,7 +428,7 @@ class KnowledgeDiscoveryService:
                             discovered_at=datetime.utcnow()
                         ))
                 else:
-                    if score >= self.config.min_similarity:
+                    if score >= self.config.min_similarity_cross_thread:
                         relationships.append(DiscoveredRelationship(
                             from_ref=thread_ref,
                             to_ref=f"message:{other_uid}",
@@ -578,29 +597,61 @@ class KnowledgeDiscoveryService:
         session: AsyncSession,
         embedding: List[float],
         source_type: str,
-        limit: int
+        limit: int,
+        boost_profile_domain: bool = True
     ) -> List[Tuple[int, float]]:
         """
         Search MemoryGate embeddings table for similar items.
 
-        Returns list of (source_id, similarity) tuples.
+        Args:
+            session: Database session
+            embedding: Query embedding vector
+            source_type: Type of source to search (observation, pattern, concept)
+            limit: Maximum results
+            boost_profile_domain: Apply boost to items with domain='profile'
+
+        Returns:
+            List of (source_id, similarity) tuples, with profile items boosted.
         """
         embedding_str = self._format_embedding_for_pgvector(embedding)
 
-        query = text(f"""
-            SELECT source_id, 1 - (embedding <=> '{embedding_str}'::vector) as similarity
-            FROM embeddings
-            WHERE tenant_id = 'cathedral'
-              AND source_type = :source_type
-              AND embedding IS NOT NULL
-            ORDER BY embedding <=> '{embedding_str}'::vector
-            LIMIT :limit
-        """)
+        # For observations, we can boost profile domain items
+        if source_type == "observation" and boost_profile_domain and self._is_postgresql():
+            # Join with observations table to get domain, apply boost
+            query = text(f"""
+                SELECT e.source_id,
+                       (1 - (e.embedding <=> '{embedding_str}'::vector)) *
+                       CASE WHEN o.domain = 'profile' THEN :profile_boost ELSE 1.0 END as similarity
+                FROM embeddings e
+                LEFT JOIN observations o ON e.source_id::text = o.id::text
+                WHERE e.tenant_id = 'cathedral'
+                  AND e.source_type = :source_type
+                  AND e.embedding IS NOT NULL
+                ORDER BY similarity DESC
+                LIMIT :limit
+            """)
 
-        result = await session.execute(query, {
-            "source_type": source_type,
-            "limit": limit
-        })
+            result = await session.execute(query, {
+                "source_type": source_type,
+                "limit": limit,
+                "profile_boost": self.config.profile_domain_boost
+            })
+        else:
+            # Standard search without profile boost
+            query = text(f"""
+                SELECT source_id, 1 - (embedding <=> '{embedding_str}'::vector) as similarity
+                FROM embeddings
+                WHERE tenant_id = 'cathedral'
+                  AND source_type = :source_type
+                  AND embedding IS NOT NULL
+                ORDER BY embedding <=> '{embedding_str}'::vector
+                LIMIT :limit
+            """)
+
+            result = await session.execute(query, {
+                "source_type": source_type,
+                "limit": limit
+            })
 
         return [(int(row[0]), float(row[1])) for row in result.fetchall()]
 
@@ -647,7 +698,8 @@ class KnowledgeDiscoveryService:
         fts_weight: Optional[float] = None,
         semantic_weight: Optional[float] = None,
         overlap_boost: Optional[float] = None,
-    ) -> List[Tuple[str, float]]:
+        return_anchors: bool = False,
+    ) -> List[Any]:  # Returns List[Tuple[str, float]] or List[HybridSearchResult]
         """
         Hybrid search for conversation messages using FTS + vector similarity with RRF.
 
@@ -668,9 +720,10 @@ class KnowledgeDiscoveryService:
             fts_weight: Weight for FTS component (default from config)
             semantic_weight: Weight for semantic component (default from config)
             overlap_boost: Multiplier for items in both result sets (default from config)
+            return_anchors: If True, return HybridSearchResult with anchor metadata
 
         Returns:
-            List of (message_uid, score) tuples, sorted by combined RRF score
+            List of (message_uid, score) tuples, or HybridSearchResult objects if return_anchors=True
         """
         # Use config defaults if not specified
         fts_weight = fts_weight or self.config.fts_weight
@@ -679,9 +732,14 @@ class KnowledgeDiscoveryService:
 
         # Fallback conditions: not PostgreSQL or no query text
         if not self._is_postgresql() or not query_text or not query_text.strip():
-            return await self._search_conversation_messages(
+            results = await self._search_conversation_messages(
                 session, embedding, exclude_thread_uid, limit
             )
+            if return_anchors:
+                return [HybridSearchResult(
+                    message_uid=uid, score=score, is_anchor=False
+                ) for uid, score in results]
+            return results
 
         tables = _get_conversation_tables()
         embedding_str = self._format_embedding_for_pgvector(embedding)
@@ -694,6 +752,7 @@ class KnowledgeDiscoveryService:
         # search_limit is larger than limit to get good candidate pool for fusion
         search_limit = limit * 3
 
+        # Updated query returns anchor info (is_dual_hit) and individual ranks
         query = text(f"""
             WITH fts_results AS (
                 SELECT m.message_uid,
@@ -720,11 +779,14 @@ class KnowledgeDiscoveryService:
                        (COALESCE(:fts_weight / (60.0 + f.fts_rank), 0) +
                         COALESCE(:sem_weight / (60.0 + s.sem_rank), 0)) *
                        CASE WHEN f.message_uid IS NOT NULL AND s.message_uid IS NOT NULL
-                            THEN :overlap_boost ELSE 1.0 END as rrf_score
+                            THEN :overlap_boost ELSE 1.0 END as rrf_score,
+                       f.message_uid IS NOT NULL AND s.message_uid IS NOT NULL as is_dual_hit,
+                       f.fts_rank,
+                       s.sem_rank
                 FROM fts_results f
                 FULL OUTER JOIN semantic_results s ON f.message_uid = s.message_uid
             )
-            SELECT message_uid, rrf_score
+            SELECT message_uid, rrf_score, is_dual_hit, fts_rank, sem_rank
             FROM combined
             ORDER BY rrf_score DESC
             LIMIT :limit
@@ -741,14 +803,30 @@ class KnowledgeDiscoveryService:
                 "limit": limit
             })
 
-            return [(row[0], float(row[1])) for row in result.fetchall()]
+            rows = result.fetchall()
+
+            if return_anchors:
+                return [HybridSearchResult(
+                    message_uid=row[0],
+                    score=float(row[1]),
+                    is_anchor=bool(row[2]),
+                    fts_rank=int(row[3]) if row[3] else None,
+                    semantic_rank=int(row[4]) if row[4] else None
+                ) for row in rows]
+            else:
+                return [(row[0], float(row[1])) for row in rows]
 
         except Exception as e:
             # Fallback to vector-only on any error (e.g., missing tsvector column)
             logger.debug(f"[Discovery] Hybrid search failed, falling back to vector-only: {e}")
-            return await self._search_conversation_messages(
+            results = await self._search_conversation_messages(
                 session, embedding, exclude_thread_uid, limit
             )
+            if return_anchors:
+                return [HybridSearchResult(
+                    message_uid=uid, score=score, is_anchor=False
+                ) for uid, score in results]
+            return results
 
     # ==========================================
     # Manual Discovery API
@@ -849,9 +927,9 @@ class KnowledgeDiscoveryService:
                         message_results = await self._search_conversation_messages_hybrid(
                             session, embedding, query_text, thread_uid, self.config.top_k
                         )
-                        # RRF scores: threshold is lower
+                        # RRF scores: use config threshold
                         for msg_uid, score in message_results:
-                            if score >= 0.005:
+                            if score >= self.config.rrf_threshold:
                                 relationships.append(DiscoveredRelationship(
                                     from_ref=ref, to_ref=f"message:{msg_uid}",
                                     rel_type="similar_to", similarity=score,
@@ -861,7 +939,7 @@ class KnowledgeDiscoveryService:
                         for msg_uid, sim in await self._search_conversation_messages(
                             session, embedding, thread_uid, self.config.top_k
                         ):
-                            if sim >= self.config.min_similarity:
+                            if sim >= self.config.min_similarity_cross_thread:
                                 relationships.append(DiscoveredRelationship(
                                     from_ref=ref, to_ref=f"message:{msg_uid}",
                                     rel_type="similar_to", similarity=sim,
@@ -902,7 +980,7 @@ class KnowledgeDiscoveryService:
                         session, embedding, query_text, ref_id, self.config.top_k
                     )
                     for msg_uid, score in message_results:
-                        if score >= 0.005:
+                        if score >= self.config.rrf_threshold:
                             relationships.append(DiscoveredRelationship(
                                 from_ref=ref, to_ref=f"message:{msg_uid}",
                                 rel_type="similar_to", similarity=score,
@@ -912,7 +990,7 @@ class KnowledgeDiscoveryService:
                     for msg_uid, sim in await self._search_conversation_messages(
                         session, embedding, ref_id, self.config.top_k
                     ):
-                        if sim >= self.config.min_similarity:
+                        if sim >= self.config.min_similarity_cross_thread:
                             relationships.append(DiscoveredRelationship(
                                 from_ref=ref, to_ref=f"message:{msg_uid}",
                                 rel_type="similar_to", similarity=sim,
@@ -1002,6 +1080,100 @@ class KnowledgeDiscoveryService:
 
         result = await session.execute(query, {"limit": limit})
         return [(row[0], float(row[1])) for row in result.fetchall()]
+
+    async def expand_with_neighbors(
+        self,
+        search_results: List[HybridSearchResult],
+        anchor_limit: Optional[int] = None,
+        non_anchor_limit: Optional[int] = None,
+    ) -> Dict[str, List[str]]:
+        """
+        Expand search results by following graph edges, with more expansion for anchors.
+
+        Anchors (dual-hit items from both FTS and semantic search) get more neighbors
+        because they're more likely to be highly relevant.
+
+        Args:
+            search_results: Results from hybrid search with anchor metadata
+            anchor_limit: Max neighbors per anchor (default from config)
+            non_anchor_limit: Max neighbors per non-anchor (default from config)
+
+        Returns:
+            Dict mapping message_uid -> list of neighbor refs (e.g., observation:123)
+        """
+        from cathedral import MemoryGate
+
+        anchor_limit = anchor_limit or self.config.anchor_neighbor_limit
+        non_anchor_limit = non_anchor_limit or self.config.non_anchor_neighbor_limit
+
+        expansion: Dict[str, List[str]] = {}
+
+        for result in search_results:
+            limit = anchor_limit if result.is_anchor else non_anchor_limit
+            if limit == 0:
+                expansion[result.message_uid] = []
+                continue
+
+            # Get related items via MemoryGate relationship graph
+            message_ref = f"message:{result.message_uid}"
+            try:
+                related = MemoryGate.list_relationships(
+                    ref=message_ref,
+                    limit=limit
+                )
+                # Extract neighbor refs from relationships
+                neighbors = []
+                for rel in related:
+                    # Get the "other" side of the relationship
+                    other_ref = rel.get("to_ref") if rel.get("from_ref") == message_ref else rel.get("from_ref")
+                    if other_ref and other_ref != message_ref:
+                        neighbors.append(other_ref)
+                expansion[result.message_uid] = neighbors[:limit]
+            except Exception as e:
+                logger.debug(f"[Discovery] Failed to expand neighbors for {message_ref}: {e}")
+                expansion[result.message_uid] = []
+
+        return expansion
+
+    async def search_with_expansion(
+        self,
+        query_text: str,
+        embedding: List[float],
+        exclude_thread_uid: str,
+        limit: int = 5,
+    ) -> Dict[str, Any]:
+        """
+        Run hybrid search and expand results with neighbors based on anchor status.
+
+        This is the main entry point for context composition - returns both
+        search results and their expanded neighbors.
+
+        Args:
+            query_text: Search query text for FTS
+            embedding: Query embedding vector
+            exclude_thread_uid: Thread to exclude from results
+            limit: Maximum search results
+
+        Returns:
+            Dict with 'results' (HybridSearchResult list) and 'expansion' (neighbors dict)
+        """
+        from cathedral.shared.db import get_async_session
+
+        async with get_async_session() as session:
+            results = await self._search_conversation_messages_hybrid(
+                session, embedding, query_text, exclude_thread_uid, limit,
+                return_anchors=True
+            )
+
+        # Expand with neighbors
+        expansion = await self.expand_with_neighbors(results)
+
+        return {
+            "results": results,
+            "expansion": expansion,
+            "anchors": [r for r in results if r.is_anchor],
+            "non_anchors": [r for r in results if not r.is_anchor],
+        }
 
 
 # Global instance
