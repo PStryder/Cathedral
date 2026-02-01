@@ -109,10 +109,10 @@ class PolicyManager:
         """Check if write access is available."""
         try:
             from cathedral import SecurityManager
-            # If security is initialized and session is unlocked, allow writes
-            if SecurityManager.is_initialized():
+            # If encryption is enabled, session must be unlocked for writes
+            if SecurityManager.is_encryption_enabled():
                 return not SecurityManager.is_locked()
-            # If security not configured, allow by default
+            # If encryption not configured, allow by default
             return True
         except ImportError:
             return True
@@ -121,7 +121,7 @@ class PolicyManager:
         """Check if privileged access is available."""
         try:
             from cathedral import SecurityManager
-            if SecurityManager.is_initialized():
+            if SecurityManager.is_encryption_enabled():
                 # Privileged access requires explicit unlock
                 return not SecurityManager.is_locked()
             return True
