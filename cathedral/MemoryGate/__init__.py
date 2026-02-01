@@ -78,14 +78,17 @@ else:
 # Module-level state
 _initialized = False
 _context: Optional[RequestContext] = None
+_anchor_chain_id: Optional[str] = None  # Single-user anchor chain
 
 
 def initialize() -> bool:
     """
     Initialize MemoryGate database connection.
     Returns True if successful, False if configuration is missing.
+
+    Also looks for an existing anchor chain (chain_type="anchor").
     """
-    global _initialized, _context
+    global _initialized, _context, _anchor_chain_id
 
     if _initialized:
         return True
@@ -137,6 +140,23 @@ def initialize() -> bool:
             agent_uuid=agent_uuid
         )
         _initialized = True
+
+        # Look for existing anchor chain (single-user: only one)
+        try:
+            anchor_chains = memory_service.memory_chain_list(
+                chain_type="anchor",
+                limit=1,
+                context=_context
+            )
+            chains = anchor_chains.get("chains", [])
+            if chains:
+                _anchor_chain_id = chains[0].get("chain_id")
+                _log.info(f"Found anchor chain: {_anchor_chain_id}")
+            else:
+                _log.debug("No anchor chain found")
+        except Exception as e:
+            _log.debug(f"Anchor chain lookup failed: {e}")
+
         _log.info("Initialized successfully")
         return True
     except Exception as e:
@@ -627,6 +647,137 @@ def list_chains(
         return []
 
 
+# === Anchor Chain Operations (Single-User) ===
+
+def get_anchor_chain_id() -> Optional[str]:
+    """
+    Get the anchor chain ID.
+
+    Returns the ID of the anchor chain if one exists, None otherwise.
+    For single-user Cathedral, there's only one anchor chain.
+    """
+    return _anchor_chain_id
+
+
+def get_anchor_chain(limit: int = 50) -> Optional[dict]:
+    """
+    Get the anchor chain with its entries.
+
+    The anchor chain contains agent identity, domain taxonomy,
+    relationship vocabulary, and operational protocols.
+
+    Returns:
+        Chain dict with entries, or None if no anchor chain exists.
+    """
+    if not _anchor_chain_id:
+        return None
+
+    return get_chain(_anchor_chain_id, limit=limit)
+
+
+def set_anchor_chain(chain_id: str) -> bool:
+    """
+    Set the anchor chain ID.
+
+    For single-user Cathedral, this sets THE anchor chain.
+    The chain should already exist (created via create_chain).
+
+    Args:
+        chain_id: The chain ID to use as anchor
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    global _anchor_chain_id
+
+    ctx = get_context()
+    if not ctx:
+        return False
+
+    # Verify chain exists
+    chain = get_chain(chain_id, limit=1)
+    if not chain:
+        _log.error(f"Cannot set anchor chain: chain {chain_id} not found")
+        return False
+
+    _anchor_chain_id = chain_id
+    _log.info(f"Anchor chain set to: {chain_id}")
+    return True
+
+
+def create_anchor_chain(
+    name: str = "cathedral_anchor",
+    title: str = "Cathedral Agent Anchor"
+) -> Optional[str]:
+    """
+    Create a new anchor chain and set it as the active anchor.
+
+    Args:
+        name: Chain name (default: cathedral_anchor)
+        title: Chain title
+
+    Returns:
+        Chain ID if successful, None otherwise.
+    """
+    global _anchor_chain_id
+
+    ctx = get_context()
+    if not ctx:
+        return None
+
+    try:
+        result = memory_service.memory_chain_create(
+            chain_type="anchor",
+            name=name,
+            title=title,
+            context=ctx
+        )
+        if result:
+            chain_id = result.get("chain_id")
+            if chain_id:
+                _anchor_chain_id = chain_id
+                _log.info(f"Created anchor chain: {chain_id}")
+                return chain_id
+    except Exception as e:
+        _log.error(f"Failed to create anchor chain: {e}")
+
+    return None
+
+
+def append_to_anchor_chain(
+    item_type: str,
+    text: str = None,
+    role: str = None
+) -> Optional[dict]:
+    """
+    Append an entry to the anchor chain.
+
+    Common roles for anchor chains:
+    - constitution: Identity and core principles
+    - verb_list: Relationship vocabulary
+    - playbook: Operational protocols
+    - domain_taxonomy: Domain categorization
+
+    Args:
+        item_type: Type of item (e.g., "text", "ref")
+        text: Text content for the entry
+        role: Entry role (constitution, verb_list, playbook, etc.)
+
+    Returns:
+        Result dict if successful, None otherwise.
+    """
+    if not _anchor_chain_id:
+        _log.error("No anchor chain set")
+        return None
+
+    return append_to_chain(
+        chain_id=_anchor_chain_id,
+        item_type=item_type,
+        text=text,
+        role=role
+    )
+
+
 # === Reference Operations ===
 
 def get_by_ref(ref: str) -> Optional[dict]:
@@ -672,7 +823,15 @@ def get_info() -> dict:
             "concepts": "Named entities in a knowledge graph. Case-insensitive, alias-aware.",
             "relationships": "Semantic connections between any memory items using ref format.",
             "chains": "Ordered sequences of items for temporal/causal tracking.",
+            "anchor_chain": "Special chain (type='anchor') containing agent identity, vocabulary, and protocols. Single-user: one per instance.",
             "refs": "Universal reference format: 'type:id' (e.g., 'observation:42', 'concept:Cathedral')",
+        },
+
+        "anchor_chain_roles": {
+            "constitution": "Agent identity and core principles",
+            "verb_list": "Relationship vocabulary (rel_types to use)",
+            "playbook": "Operational protocols and behaviors",
+            "domain_taxonomy": "Domain categorization guidance",
         },
 
         "confidence_guide": {
@@ -832,6 +991,12 @@ __all__ = [
     "append_to_chain",
     "get_chain",
     "list_chains",
+    # Anchor Chain (single-user)
+    "get_anchor_chain_id",
+    "get_anchor_chain",
+    "set_anchor_chain",
+    "create_anchor_chain",
+    "append_to_anchor_chain",
     # References
     "get_by_ref",
     "format_ref",
