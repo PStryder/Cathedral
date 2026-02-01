@@ -107,6 +107,7 @@ async def process_input_stream(
     services: ServiceRegistry | None = None,
     enable_tools: bool = False,
     enabled_gates: list[str] | None = None,
+    enable_context: bool = True,
 ) -> AsyncGenerator[str, None]:
     """
     Process input and stream response tokens.
@@ -118,6 +119,7 @@ async def process_input_stream(
         enable_tools: Enable tool calling (ToolGate orchestration)
         enabled_gates: List of gate names to enable (e.g., ["MemoryGate", "ShellGate"])
                        If None and enable_tools=True, all gates are enabled
+        enable_context: Enable context injection (RAG/memory context)
 
     Yields:
         Response tokens
@@ -203,14 +205,17 @@ async def process_input_stream(
     # Now append current user message to storage (for future turns)
     await loom.append_async("user", user_input, thread_uid=thread_uid)
 
-    # Gather evidence layer content
-    # Run sync memory search in executor to avoid greenlet errors
-    loop = asyncio.get_running_loop()
-    memory_context = await loop.run_in_executor(
-        None,
-        partial(build_memory_context, user_input, limit=3, min_confidence=0.5)
-    )
-    scripture_context = await ScriptureGate.build_context(user_input, limit=2, min_similarity=0.4)
+    # Gather evidence layer content (only if context injection enabled)
+    memory_context = None
+    scripture_context = None
+    if enable_context:
+        # Run sync memory search in executor to avoid greenlet errors
+        loop = asyncio.get_running_loop()
+        memory_context = await loop.run_in_executor(
+            None,
+            partial(build_memory_context, user_input, limit=3, min_confidence=0.5)
+        )
+        scripture_context = await ScriptureGate.build_context(user_input, limit=2, min_similarity=0.4)
 
     # === ASSEMBLE IN CHRONOLOGICAL ORDER ===
     # LLMs expect: system prompts -> conversation history -> current message

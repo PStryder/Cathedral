@@ -15,11 +15,16 @@ class UserInput(BaseModel):
     thread_uid: str
     enable_tools: bool = False  # Enable ToolGate tool calling
     enabled_gates: list[str] = []  # List of enabled gates (e.g., ["MemoryGate", "ShellGate"])
+    enable_context: bool = True  # Enable context injection (RAG/memory context)
 
 
 class ThreadRequest(BaseModel):
     thread_uid: str | None = None
     thread_name: str | None = None
+
+
+class RenameThreadRequest(BaseModel):
+    thread_name: str
 
 
 def create_router(templates, process_input_stream, loom, services) -> APIRouter:
@@ -51,6 +56,15 @@ def create_router(templates, process_input_stream, loom, services) -> APIRouter:
         history = await loom.recall_async(thread_uid)
         return {"history": history if history else []}
 
+    @router.put("/api/thread/{thread_uid}/rename")
+    async def api_rename_thread(thread_uid: str, request: RenameThreadRequest):
+        """Rename a thread."""
+        success = services.conversation.rename_thread(thread_uid, request.thread_name)
+        if success:
+            return {"status": "renamed", "thread_uid": thread_uid, "thread_name": request.thread_name}
+        else:
+            return {"status": "error", "message": "Thread not found"}
+
     @router.post("/api/chat/stream")
     async def api_chat_stream(user_input: UserInput):
         """
@@ -70,6 +84,7 @@ def create_router(templates, process_input_stream, loom, services) -> APIRouter:
                     services=services,
                     enable_tools=user_input.enable_tools,
                     enabled_gates=user_input.enabled_gates if user_input.enabled_gates else None,
+                    enable_context=user_input.enable_context,
                 ):
                     yield {"data": json.dumps({"token": token})}
                 yield {"data": json.dumps({"done": True})}

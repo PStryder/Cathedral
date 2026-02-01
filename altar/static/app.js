@@ -8,6 +8,8 @@ const state = {
     consoleLineCount: 0,
     maxConsoleLines: 200,
     toolsEnabled: false,
+    contextInjectionEnabled: true,  // Context injection (RAG/memory context)
+    isEditingThreadName: false,
     // Per-gate enablement
     enabledGates: {
         MemoryGate: false,
@@ -50,7 +52,12 @@ const elements = {
     gateFilesystem: document.getElementById('gateFilesystem'),
     gateShell: document.getElementById('gateShell'),
     gateBrowser: document.getElementById('gateBrowser'),
-    gateSubAgent: document.getElementById('gateSubAgent')
+    gateSubAgent: document.getElementById('gateSubAgent'),
+    // Context toggle
+    contextToggle: document.getElementById('contextToggle'),
+    contextLabel: document.getElementById('contextLabel'),
+    // Thread name editing
+    threadNameInput: document.getElementById('threadNameInput')
 };
 
 // ========== Thread Management ==========
@@ -327,7 +334,8 @@ async function sendMessage() {
                 user_input: text,
                 thread_uid: state.currentThreadUid,
                 enable_tools: anyToolsEnabled,
-                enabled_gates: enabledGates
+                enabled_gates: enabledGates,
+                enable_context: state.contextInjectionEnabled
             })
         });
 
@@ -636,6 +644,81 @@ gateElements.forEach(el => {
         });
     }
 });
+
+// Context toggle
+if (elements.contextToggle) {
+    elements.contextToggle.addEventListener('change', (e) => {
+        state.contextInjectionEnabled = e.target.checked;
+        if (elements.contextLabel) {
+            elements.contextLabel.className = e.target.checked ? 'font-medium' : '';
+        }
+        Console.info(e.target.checked
+            ? 'Context injection enabled'
+            : 'Context injection disabled');
+    });
+}
+
+// Thread name editing
+elements.currentThreadName.addEventListener('click', startEditingThreadName);
+elements.threadNameInput.addEventListener('blur', finishEditingThreadName);
+elements.threadNameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        finishEditingThreadName();
+    } else if (e.key === 'Escape') {
+        cancelEditingThreadName();
+    }
+});
+
+function startEditingThreadName() {
+    if (!state.currentThreadUid || state.isEditingThreadName) return;
+
+    state.isEditingThreadName = true;
+    elements.currentThreadName.classList.add('hidden');
+    elements.threadNameInput.classList.remove('hidden');
+    elements.threadNameInput.value = state.currentThreadName || '';
+    elements.threadNameInput.focus();
+    elements.threadNameInput.select();
+}
+
+function cancelEditingThreadName() {
+    state.isEditingThreadName = false;
+    elements.threadNameInput.classList.add('hidden');
+    elements.currentThreadName.classList.remove('hidden');
+}
+
+async function finishEditingThreadName() {
+    if (!state.isEditingThreadName) return;
+
+    const newName = elements.threadNameInput.value.trim();
+    state.isEditingThreadName = false;
+    elements.threadNameInput.classList.add('hidden');
+    elements.currentThreadName.classList.remove('hidden');
+
+    // Skip if name unchanged or empty
+    if (!newName || newName === state.currentThreadName) return;
+
+    try {
+        const response = await fetch(`/api/thread/${state.currentThreadUid}/rename`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ thread_name: newName })
+        });
+
+        if (response.ok) {
+            state.currentThreadName = newName;
+            elements.currentThreadName.textContent = newName;
+            Console.success(`Thread renamed to "${newName}"`);
+            // Refresh thread list to show new name in sidebar
+            await loadThreads();
+        } else {
+            Console.error('Failed to rename thread');
+        }
+    } catch (error) {
+        console.error('Failed to rename thread:', error);
+        Console.error(`Rename failed: ${error.message}`);
+    }
+}
 
 // ========== Initialize ==========
 

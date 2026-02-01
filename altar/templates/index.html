@@ -202,7 +202,8 @@
         <main class="flex-1 flex flex-col">
             <!-- Chat Header -->
             <header class="h-14 border-b border-cathedral-border flex items-center px-6">
-                <span id="currentThreadName" class="font-medium">Select a thread</span>
+                <span id="currentThreadName" class="font-medium cursor-pointer hover:text-cathedral-accent transition-colors" title="Click to rename">Select a thread</span>
+                <input type="text" id="threadNameInput" class="hidden font-medium bg-cathedral-surface border border-cathedral-accent rounded px-2 py-1 text-cathedral-text focus:outline-none focus:ring-1 focus:ring-cathedral-accent" />
                 <span id="currentThreadId" class="ml-3 text-xs text-cathedral-muted mono"></span>
             </header>
 
@@ -251,6 +252,12 @@
                             <span>Commands: /search, /remember, /lock, /spawn</span>
                             <!-- Gate Toggles -->
                             <div class="flex items-center gap-3">
+                                <label class="flex items-center gap-1.5 cursor-pointer select-none" title="Context injection (RAG/memory context in prompts)">
+                                    <input type="checkbox" id="contextToggle" checked
+                                           class="w-3.5 h-3.5 rounded border-gray-600 bg-gray-700 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-0">
+                                    <span class="text-indigo-400">&#128218;</span>
+                                    <span id="contextLabel" class="font-medium">Context</span>
+                                </label>
                                 <label class="flex items-center gap-1.5 cursor-pointer select-none" title="Memory (search, recall, store)">
                                     <input type="checkbox" id="gateMemory" data-gate="MemoryGate"
                                            class="w-3.5 h-3.5 rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-0">
