@@ -634,6 +634,99 @@ def get_health_status() -> Dict[str, Any]:
     return ShellGate.get_health_status()
 
 
+def get_info() -> dict:
+    """
+    Get comprehensive documentation for ShellGate.
+
+    Returns complete tool documentation including purpose, call formats,
+    expected responses, and security policies.
+    """
+    return {
+        "gate": "ShellGate",
+        "version": "1.0",
+        "purpose": "Secure shell command execution with risk assessment and security policies. Allows running system commands while blocking dangerous operations.",
+
+        "security_model": {
+            "blocked_commands": "Certain commands are blocked entirely (rm -rf /, format, etc.)",
+            "risk_levels": "Commands are assessed as low/medium/high/critical risk",
+            "working_directory": "Commands run in a controlled working directory",
+            "timeout": "Commands have execution timeouts to prevent hangs",
+        },
+
+        "tools": {
+            "execute": {
+                "purpose": "Execute a shell command and return the result",
+                "call_format": {
+                    "command": {"type": "string", "required": True, "description": "Command to execute"},
+                    "working_dir": {"type": "string", "required": False, "description": "Working directory (defaults to project root)"},
+                    "timeout": {"type": "integer", "required": False, "description": "Timeout in seconds (default: 30)"},
+                },
+                "response": {
+                    "success": "boolean - whether command succeeded (exit code 0)",
+                    "stdout": "string - standard output",
+                    "stderr": "string - standard error",
+                    "exit_code": "integer - process exit code",
+                    "duration_ms": "integer - execution time in milliseconds",
+                },
+                "example": 'ShellGate.execute(command="git status", working_dir="/path/to/repo")',
+                "note": "Subject to security policy. Use validate_command() first if unsure.",
+            },
+
+            "validate_command": {
+                "purpose": "Check if a command is allowed by security policy without executing it",
+                "call_format": {
+                    "command": {"type": "string", "required": True, "description": "Command to validate"},
+                },
+                "response": {
+                    "allowed": "boolean - whether command would be allowed",
+                    "reason": "string - explanation if blocked",
+                    "risk_level": "string - assessed risk level",
+                },
+                "example": 'ShellGate.validate_command(command="rm -rf /tmp/test")',
+                "note": "Always validate potentially dangerous commands before execution",
+            },
+
+            "estimate_risk": {
+                "purpose": "Assess the risk level of a command",
+                "call_format": {
+                    "command": {"type": "string", "required": True, "description": "Command to assess"},
+                },
+                "response": {
+                    "risk_level": "string - 'low', 'medium', 'high', or 'critical'",
+                    "factors": "array - risk factors identified",
+                    "recommendation": "string - suggested action",
+                },
+                "example": 'ShellGate.estimate_risk(command="sudo apt-get update")',
+            },
+
+            "get_history": {
+                "purpose": "Get recent command execution history",
+                "call_format": {
+                    "limit": {"type": "integer", "required": False, "default": 20, "description": "Max entries to return"},
+                    "success_only": {"type": "boolean", "required": False, "default": False, "description": "Only show successful commands"},
+                },
+                "response": {
+                    "type": "array",
+                    "items": "CommandExecution objects with command, timestamp, exit_code, duration",
+                },
+                "example": 'ShellGate.get_history(limit=10, success_only=True)',
+            },
+        },
+
+        "blocked_patterns": [
+            "rm -rf /", "format", "mkfs", "> /dev/sda", "dd if=/dev/zero", ":(){ :|:& };:",
+        ],
+
+        "best_practices": [
+            "Use validate_command() before executing unknown commands",
+            "Check estimate_risk() for commands that modify system state",
+            "Prefer specific commands over shell expansion (avoid *)",
+            "Set appropriate timeouts for long-running commands",
+            "Review command history when debugging issues",
+        ],
+    }
+
+
 __all__ = [
     # Class
     "ShellGate",
@@ -658,4 +751,6 @@ __all__ = [
     "CommandStatus",
     # Errors
     "CommandSecurityError",
+    # Documentation
+    "get_info",
 ]

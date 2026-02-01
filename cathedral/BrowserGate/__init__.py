@@ -78,6 +78,8 @@ __all__ = [
     "get_server",
     "start_extension_server",
     "stop_extension_server",
+    # Documentation
+    "get_info",
 ]
 
 
@@ -309,3 +311,78 @@ def get_health_status() -> Dict[str, Any]:
 def get_dependencies() -> List[str]:
     """List external dependencies."""
     return get_browser().get_dependencies()
+
+
+def get_info() -> dict:
+    """
+    Get comprehensive documentation for BrowserGate.
+
+    Returns complete tool documentation including purpose, call formats,
+    expected responses, and provider information.
+    """
+    return {
+        "gate": "BrowserGate",
+        "version": "1.0",
+        "purpose": "Web browsing capabilities including search and page fetching. Supports multiple search providers and content extraction modes.",
+
+        "search_providers": {
+            "duckduckgo": "Default. Privacy-focused, no API key required.",
+            "google": "Requires API key. High quality results.",
+            "bing": "Requires API key. Good for diverse results.",
+        },
+
+        "fetch_modes": {
+            "readable": "Extract main content using readability algorithms (default)",
+            "raw": "Return raw HTML",
+            "screenshot": "Capture page screenshot (requires browser extension)",
+        },
+
+        "tools": {
+            "search": {
+                "purpose": "Search the web using configured provider",
+                "call_format": {
+                    "query": {"type": "string", "required": True, "description": "Search query"},
+                    "provider": {"type": "string", "required": False, "default": "duckduckgo", "enum": ["duckduckgo", "google", "bing"], "description": "Search provider to use"},
+                    "max_results": {"type": "integer", "required": False, "default": 5, "description": "Maximum results to return"},
+                },
+                "response": {
+                    "query": "string - the search query",
+                    "provider": "string - provider used",
+                    "results": "array of SearchResult objects",
+                    "SearchResult": {
+                        "title": "string - result title",
+                        "url": "string - result URL",
+                        "snippet": "string - text snippet",
+                    },
+                },
+                "example": 'await BrowserGate.search(query="python asyncio tutorial", max_results=5)',
+            },
+
+            "fetch": {
+                "purpose": "Fetch and extract content from a web page",
+                "call_format": {
+                    "url": {"type": "string", "required": True, "description": "URL to fetch"},
+                    "mode": {"type": "string", "required": False, "default": "readable", "enum": ["readable", "raw", "screenshot"], "description": "Content extraction mode"},
+                },
+                "response": {
+                    "url": "string - final URL (after redirects)",
+                    "title": "string - page title",
+                    "content": "string - extracted content (markdown for readable, HTML for raw)",
+                    "content_format": "string - 'markdown', 'html', or 'image'",
+                    "fetch_mode": "string - mode used",
+                    "word_count": "integer - approximate word count",
+                    "fetch_time_ms": "integer - fetch duration",
+                },
+                "example": 'await BrowserGate.fetch(url="https://example.com", mode="readable")',
+                "note": "Readable mode converts HTML to clean markdown. Best for text extraction.",
+            },
+        },
+
+        "best_practices": [
+            "Use 'readable' mode for text content extraction",
+            "Use 'raw' mode only when you need exact HTML structure",
+            "DuckDuckGo is rate-limited - don't spam searches",
+            "Check response.word_count to estimate content size",
+            "Handle fetch failures gracefully - pages may block bots",
+        ],
+    }

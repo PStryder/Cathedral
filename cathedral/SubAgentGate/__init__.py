@@ -706,6 +706,140 @@ def get_health_status() -> dict:
     }
 
 
+def get_info() -> dict:
+    """
+    Get comprehensive documentation for SubAgentGate.
+
+    Returns complete tool documentation including purpose, call formats,
+    expected responses, and agent type guidance.
+    """
+    return {
+        "gate": "SubAgentGate",
+        "version": "1.0",
+        "purpose": "Spawn and manage sub-agents that can work autonomously on tasks. Supports simple LLM completions, autonomous coding agents (Claude Code), and Codex agents.",
+
+        "agent_types": {
+            "llm": {
+                "description": "Simple LLM completion agent using configured model",
+                "capabilities": "Text generation, answering questions, analysis",
+                "best_for": "Quick questions, text processing, analysis tasks",
+                "has_tools": False,
+            },
+            "claude_code": {
+                "description": "Autonomous coding agent with file system and tool access",
+                "capabilities": "Read/write files, execute commands, use tools, multi-step reasoning",
+                "best_for": "Complex coding tasks, file operations, multi-step workflows",
+                "has_tools": True,
+                "requires": "Claude Code CLI installed",
+            },
+            "codex": {
+                "description": "OpenAI Codex-based agent for code generation",
+                "capabilities": "Code completion, generation, transformation",
+                "best_for": "Code generation, refactoring, translation",
+                "has_tools": False,
+                "requires": "OpenAI API key",
+            },
+        },
+
+        "tools": {
+            "spawn": {
+                "purpose": "Create and start a new sub-agent",
+                "call_format": {
+                    "task": {"type": "string", "required": True, "description": "Task instructions for the agent"},
+                    "context": {"type": "object", "required": False, "description": "Context dict to pass to agent"},
+                    "agent_type": {"type": "string", "required": False, "default": "llm", "enum": ["llm", "claude_code", "codex"], "description": "Agent backend type"},
+                    "working_dir": {"type": "string", "required": False, "description": "Working directory for CLI agents"},
+                    "personality": {"type": "string", "required": False, "description": "Personality ID (for llm type only)"},
+                },
+                "response": {
+                    "agent_id": "string - unique agent identifier",
+                    "status": "string - 'running', 'completed', or 'failed'",
+                    "agent_type": "string - the agent type used",
+                },
+                "example": 'SubAgentGate.spawn(task="Implement the login function", agent_type="claude_code", working_dir="/project")',
+            },
+
+            "status": {
+                "purpose": "Check the current status of a sub-agent",
+                "call_format": {
+                    "agent_id": {"type": "string", "required": True, "description": "Agent ID from spawn()"},
+                },
+                "response": {
+                    "agent_id": "string",
+                    "status": "string - 'pending', 'running', 'completed', 'failed', 'cancelled'",
+                    "agent_type": "string",
+                    "started_at": "string - ISO timestamp",
+                    "completed_at": "string - ISO timestamp if completed",
+                },
+                "example": 'SubAgentGate.status(agent_id="agent_abc123")',
+            },
+
+            "result": {
+                "purpose": "Get the result from a completed sub-agent",
+                "call_format": {
+                    "agent_id": {"type": "string", "required": True, "description": "Agent ID"},
+                },
+                "response": {
+                    "agent_id": "string",
+                    "status": "string",
+                    "result": "string - agent output/response",
+                    "error": "string - error message if failed",
+                },
+                "example": 'SubAgentGate.result(agent_id="agent_abc123")',
+                "note": "Only available after agent completes. Check status first.",
+            },
+
+            "list_agents": {
+                "purpose": "List all sub-agents",
+                "call_format": {
+                    "include_completed": {"type": "boolean", "required": False, "default": True, "description": "Include completed agents"},
+                },
+                "response": {
+                    "type": "array",
+                    "items": "SubAgent objects with id, status, type, task summary",
+                },
+                "example": 'SubAgentGate.list_agents(include_completed=False)',
+            },
+
+            "cancel": {
+                "purpose": "Cancel a running sub-agent",
+                "call_format": {
+                    "agent_id": {"type": "string", "required": True, "description": "Agent ID to cancel"},
+                },
+                "response": {
+                    "success": "boolean",
+                    "message": "string",
+                },
+                "example": 'SubAgentGate.cancel(agent_id="agent_abc123")',
+            },
+
+            "prompt": {
+                "purpose": "Send a follow-up message to a completed agent, continuing its conversation",
+                "call_format": {
+                    "agent_id": {"type": "string", "required": True, "description": "ID of completed agent"},
+                    "message": {"type": "string", "required": True, "description": "Follow-up message"},
+                },
+                "response": {
+                    "agent_id": "string - new agent ID for this continuation",
+                    "status": "string",
+                    "result": "string - agent response",
+                },
+                "example": 'SubAgentGate.prompt(agent_id="agent_abc123", message="Now add error handling")',
+                "note": "Creates a new agent that continues from the previous conversation.",
+            },
+        },
+
+        "best_practices": [
+            "Use 'llm' for simple questions, 'claude_code' for complex tasks",
+            "Provide clear, specific task instructions",
+            "Include relevant context when spawning agents",
+            "Poll status() to track long-running agents",
+            "Use prompt() to iterate on agent work without starting fresh",
+            "Cancel stuck agents rather than waiting indefinitely",
+        ],
+    }
+
+
 __all__ = [
     # Class
     "SubAgentManager",
@@ -728,4 +862,6 @@ __all__ = [
     "SubAgent",
     "AgentStatus",
     "AgentType",
+    # Documentation
+    "get_info",
 ]

@@ -824,6 +824,148 @@ def get_health_status() -> Dict[str, Any]:
     return FileSystemGate.get_health_status()
 
 
+def get_info() -> dict:
+    """
+    Get comprehensive documentation for FileSystemGate.
+
+    Returns complete tool documentation including purpose, call formats,
+    expected responses, and security information.
+    """
+    return {
+        "gate": "FileSystemGate",
+        "version": "1.0",
+        "purpose": "Secure file system access through registered folders. All operations are sandboxed to pre-registered directories with configurable permissions. Prevents path traversal and unauthorized access.",
+
+        "concepts": {
+            "folder_id": "Unique identifier for a registered folder (e.g., 'hexylab', 'workspace')",
+            "relative_path": "Path relative to the registered folder root. Cannot escape the folder.",
+            "permissions": "read, write, delete - configurable per folder",
+            "backup_policy": "Automatic backups before destructive operations",
+        },
+
+        "tools": {
+            "list_folders": {
+                "purpose": "List all registered folders available for file operations",
+                "call_format": {},
+                "response": {
+                    "type": "array",
+                    "items": "FolderConfig objects with id, path, permissions, description",
+                },
+                "example": "FileSystemGate.list_folders()",
+                "note": "Call this first to discover available folders",
+            },
+
+            "list_dir": {
+                "purpose": "List contents of a directory within a registered folder",
+                "call_format": {
+                    "folder_id": {"type": "string", "required": True, "description": "Registered folder ID"},
+                    "relative_path": {"type": "string", "required": False, "default": "", "description": "Path within folder (empty = root)"},
+                    "show_hidden": {"type": "boolean", "required": False, "default": False, "description": "Include hidden files (starting with .)"},
+                },
+                "response": {
+                    "success": "boolean",
+                    "data": "Array of FileInfo objects with name, type (file/dir), size, modified timestamp",
+                    "error": "string if failed",
+                },
+                "example": 'FileSystemGate.list_dir(folder_id="hexylab", relative_path="src")',
+            },
+
+            "read_file": {
+                "purpose": "Read contents of a file",
+                "call_format": {
+                    "folder_id": {"type": "string", "required": True, "description": "Registered folder ID"},
+                    "relative_path": {"type": "string", "required": True, "description": "Path to file"},
+                    "encoding": {"type": "string", "required": False, "default": "utf-8", "description": "Text encoding"},
+                    "binary": {"type": "boolean", "required": False, "default": False, "description": "Read as binary (returns base64)"},
+                },
+                "response": {
+                    "success": "boolean",
+                    "data": "File contents as string (or base64 if binary)",
+                    "error": "string if failed",
+                },
+                "example": 'FileSystemGate.read_file(folder_id="hexylab", relative_path="README.md")',
+            },
+
+            "write_file": {
+                "purpose": "Write content to a file (creates or overwrites)",
+                "call_format": {
+                    "folder_id": {"type": "string", "required": True, "description": "Registered folder ID"},
+                    "relative_path": {"type": "string", "required": True, "description": "Path to file"},
+                    "content": {"type": "string", "required": True, "description": "Content to write"},
+                    "encoding": {"type": "string", "required": False, "default": "utf-8", "description": "Text encoding"},
+                    "create_dirs": {"type": "boolean", "required": False, "default": True, "description": "Create parent directories if needed"},
+                },
+                "response": {
+                    "success": "boolean",
+                    "data": "Confirmation message with bytes written",
+                    "error": "string if failed",
+                },
+                "example": 'FileSystemGate.write_file(folder_id="hexylab", relative_path="output.txt", content="Hello World")',
+                "note": "Requires write permission on folder. Creates backup if file exists.",
+            },
+
+            "mkdir": {
+                "purpose": "Create a directory",
+                "call_format": {
+                    "folder_id": {"type": "string", "required": True, "description": "Registered folder ID"},
+                    "relative_path": {"type": "string", "required": True, "description": "Directory path to create"},
+                    "parents": {"type": "boolean", "required": False, "default": True, "description": "Create parent directories"},
+                },
+                "response": {
+                    "success": "boolean",
+                    "data": "Confirmation message",
+                    "error": "string if failed",
+                },
+                "example": 'FileSystemGate.mkdir(folder_id="hexylab", relative_path="new/nested/dir")',
+            },
+
+            "delete": {
+                "purpose": "Delete a file or directory",
+                "call_format": {
+                    "folder_id": {"type": "string", "required": True, "description": "Registered folder ID"},
+                    "relative_path": {"type": "string", "required": True, "description": "Path to delete"},
+                    "recursive": {"type": "boolean", "required": False, "default": False, "description": "Delete directories recursively"},
+                },
+                "response": {
+                    "success": "boolean",
+                    "data": "Confirmation message",
+                    "error": "string if failed",
+                },
+                "example": 'FileSystemGate.delete(folder_id="hexylab", relative_path="temp.txt")',
+                "note": "Requires delete permission. Creates backup before deletion.",
+            },
+
+            "info": {
+                "purpose": "Get detailed information about a file or directory",
+                "call_format": {
+                    "folder_id": {"type": "string", "required": True, "description": "Registered folder ID"},
+                    "relative_path": {"type": "string", "required": True, "description": "Path to inspect"},
+                },
+                "response": {
+                    "success": "boolean",
+                    "data": "FileInfo object with name, type, size, created, modified, permissions",
+                    "error": "string if failed",
+                },
+                "example": 'FileSystemGate.info(folder_id="hexylab", relative_path="src/main.py")',
+            },
+        },
+
+        "security": {
+            "path_validation": "All paths are validated to prevent traversal attacks (../, absolute paths)",
+            "folder_sandboxing": "Operations cannot escape registered folder boundaries",
+            "permission_model": "Each folder has explicit read/write/delete permissions",
+            "backup_on_modify": "Automatic backups created before write/delete operations",
+        },
+
+        "best_practices": [
+            "Always call list_folders() first to discover available folders",
+            "Use info() to check file existence before read/write",
+            "Prefer relative paths - absolute paths are rejected",
+            "Check response.success before using response.data",
+        ],
+    }
+
+
 __all__ = [
     # Class
     "FileSystemGate",
@@ -854,4 +996,6 @@ __all__ = [
     "FileInfo",
     # Errors
     "PathSecurityError",
+    # Documentation
+    "get_info",
 ]

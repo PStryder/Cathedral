@@ -67,7 +67,10 @@ def _serialize_result(result: Any) -> Any:
 
 def _get_gate_module(gate_name: str):
     """Dynamically import and return a gate module."""
-    if gate_name == "MemoryGate":
+    if gate_name == "ToolGate":
+        from cathedral import ToolGate
+        return ToolGate
+    elif gate_name == "MemoryGate":
         from cathedral import MemoryGate
         return MemoryGate
     elif gate_name == "FileSystemGate":

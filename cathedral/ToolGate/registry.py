@@ -25,6 +25,13 @@ _log = GateLogger.get("ToolGate")
 # MemoryGate tools
 MEMORYGATE_TOOLS: List[Dict[str, Any]] = [
     {
+        "method": "get_info",
+        "description": "Get comprehensive documentation for MemoryGate including all tools, call formats, and best practices",
+        "policy": PolicyClass.READ_ONLY,
+        "is_async": False,
+        "args": {},
+    },
+    {
         "method": "search",
         "description": "Semantic search across memory observations, patterns, and concepts",
         "policy": PolicyClass.READ_ONLY,
@@ -105,6 +112,13 @@ MEMORYGATE_TOOLS: List[Dict[str, Any]] = [
 # FileSystemGate tools
 FILESYSTEMGATE_TOOLS: List[Dict[str, Any]] = [
     {
+        "method": "get_info",
+        "description": "Get comprehensive documentation for FileSystemGate including all tools, call formats, and security info",
+        "policy": PolicyClass.READ_ONLY,
+        "is_async": False,
+        "args": {},
+    },
+    {
         "method": "list_dir",
         "description": "List contents of a directory",
         "policy": PolicyClass.READ_ONLY,
@@ -184,6 +198,13 @@ FILESYSTEMGATE_TOOLS: List[Dict[str, Any]] = [
 # ShellGate tools
 SHELLGATE_TOOLS: List[Dict[str, Any]] = [
     {
+        "method": "get_info",
+        "description": "Get comprehensive documentation for ShellGate including all tools, call formats, and security policies",
+        "policy": PolicyClass.READ_ONLY,
+        "is_async": False,
+        "args": {},
+    },
+    {
         "method": "execute",
         "description": "Execute a shell command (subject to security policy)",
         "policy": PolicyClass.PRIVILEGED,
@@ -226,6 +247,13 @@ SHELLGATE_TOOLS: List[Dict[str, Any]] = [
 
 # ScriptureGate tools
 SCRIPTUREGATE_TOOLS: List[Dict[str, Any]] = [
+    {
+        "method": "get_info",
+        "description": "Get comprehensive documentation for ScriptureGate including all tools, call formats, and RAG usage",
+        "policy": PolicyClass.READ_ONLY,
+        "is_async": False,
+        "args": {},
+    },
     {
         "method": "search",
         "description": "Semantic search across stored documents",
@@ -292,6 +320,13 @@ SCRIPTUREGATE_TOOLS: List[Dict[str, Any]] = [
 # BrowserGate tools
 BROWSERGATE_TOOLS: List[Dict[str, Any]] = [
     {
+        "method": "get_info",
+        "description": "Get comprehensive documentation for BrowserGate including all tools, call formats, and providers",
+        "policy": PolicyClass.READ_ONLY,
+        "is_async": False,
+        "args": {},
+    },
+    {
         "method": "search",
         "description": "Search the web",
         "policy": PolicyClass.NETWORK,
@@ -326,8 +361,26 @@ BROWSERGATE_TOOLS: List[Dict[str, Any]] = [
     },
 ]
 
+# ToolGate tools (meta-documentation)
+TOOLGATE_TOOLS: List[Dict[str, Any]] = [
+    {
+        "method": "get_info",
+        "description": "Get comprehensive documentation for the entire tool system including protocol format, policy classes, available gates, and how to discover tool documentation",
+        "policy": PolicyClass.READ_ONLY,
+        "is_async": False,
+        "args": {},
+    },
+]
+
 # SubAgentGate tools
 SUBAGENTGATE_TOOLS: List[Dict[str, Any]] = [
+    {
+        "method": "get_info",
+        "description": "Get comprehensive documentation for SubAgentGate including all tools, call formats, and agent types",
+        "policy": PolicyClass.READ_ONLY,
+        "is_async": False,
+        "args": {},
+    },
     {
         "method": "spawn",
         "description": "Spawn a sub-agent to handle a task. Use agent_type='claude_code' for autonomous coding agents with file/tool access.",
@@ -419,6 +472,7 @@ class ToolRegistry:
         if cls._initialized:
             return
 
+        cls._register_gate_tools("ToolGate", TOOLGATE_TOOLS)
         cls._register_gate_tools("MemoryGate", MEMORYGATE_TOOLS)
         cls._register_gate_tools("FileSystemGate", FILESYSTEMGATE_TOOLS)
         cls._register_gate_tools("ShellGate", SHELLGATE_TOOLS)
@@ -649,6 +703,7 @@ class ToolRegistry:
 
 __all__ = [
     "ToolRegistry",
+    "TOOLGATE_TOOLS",
     "MEMORYGATE_TOOLS",
     "FILESYSTEMGATE_TOOLS",
     "SHELLGATE_TOOLS",

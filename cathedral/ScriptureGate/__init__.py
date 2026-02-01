@@ -781,6 +781,124 @@ def stats() -> Dict:
         }
 
 
+def get_info() -> dict:
+    """
+    Get comprehensive documentation for ScriptureGate.
+
+    Returns complete tool documentation including purpose, call formats,
+    expected responses, and RAG usage guidance.
+    """
+    return {
+        "gate": "ScriptureGate",
+        "version": "1.0",
+        "purpose": "Document storage and retrieval system with vector embeddings for semantic search. Enables RAG (Retrieval Augmented Generation) by building relevant context from stored documents.",
+
+        "concepts": {
+            "scripture": "A stored document with metadata and vector embedding",
+            "scripture_uid": "Unique identifier for each stored document",
+            "embedding": "Vector representation for semantic similarity search",
+            "RAG_context": "Retrieved text chunks relevant to a query, used to augment prompts",
+        },
+
+        "supported_file_types": [
+            "text", "markdown", "code", "json", "yaml", "pdf", "artifact",
+        ],
+
+        "tools": {
+            "search": {
+                "purpose": "Semantic search across stored documents using vector similarity",
+                "call_format": {
+                    "query": {"type": "string", "required": True, "description": "Search query"},
+                    "limit": {"type": "integer", "required": False, "default": 5, "description": "Max results"},
+                    "file_type": {"type": "string", "required": False, "description": "Filter by file type"},
+                    "min_similarity": {"type": "number", "required": False, "default": 0.0, "description": "Minimum similarity threshold (0-1)"},
+                },
+                "response": {
+                    "type": "array",
+                    "items": "Scripture objects with uid, title, similarity score, snippet",
+                },
+                "example": 'await ScriptureGate.search(query="database schema design", limit=5)',
+            },
+
+            "build_context": {
+                "purpose": "Build RAG context string from relevant documents for prompt augmentation",
+                "call_format": {
+                    "query": {"type": "string", "required": True, "description": "Query to find relevant context"},
+                    "limit": {"type": "integer", "required": False, "default": 3, "description": "Max documents to include"},
+                    "min_similarity": {"type": "number", "required": False, "default": 0.3, "description": "Minimum similarity threshold"},
+                },
+                "response": {
+                    "type": "string",
+                    "description": "Formatted context string with document excerpts, ready for prompt injection",
+                },
+                "example": 'context = await ScriptureGate.build_context(query="API authentication", limit=3)',
+                "note": "This is the primary RAG interface. Returns formatted text ready to include in prompts.",
+            },
+
+            "store_text": {
+                "purpose": "Store text content as a scripture with automatic embedding",
+                "call_format": {
+                    "content": {"type": "string", "required": True, "description": "Text content to store"},
+                    "title": {"type": "string", "required": True, "description": "Document title"},
+                    "description": {"type": "string", "required": False, "description": "Optional description"},
+                    "tags": {"type": "array", "required": False, "description": "Optional tags for categorization"},
+                },
+                "response": {
+                    "scripture_uid": "string - unique ID of stored scripture",
+                    "title": "string - document title",
+                    "indexed": "boolean - whether embedding was created",
+                },
+                "example": 'await ScriptureGate.store_text(content="...", title="API Documentation")',
+            },
+
+            "get": {
+                "purpose": "Get scripture metadata by UID",
+                "call_format": {
+                    "scripture_uid": {"type": "string", "required": True, "description": "Scripture UID"},
+                },
+                "response": {
+                    "type": "Scripture object",
+                    "fields": "uid, title, description, file_type, tags, created_at, is_indexed",
+                },
+                "example": 'ScriptureGate.get(scripture_uid="abc123")',
+            },
+
+            "list_scriptures": {
+                "purpose": "List all stored scriptures",
+                "call_format": {
+                    "file_type": {"type": "string", "required": False, "description": "Filter by type"},
+                    "limit": {"type": "integer", "required": False, "default": 20, "description": "Max results"},
+                },
+                "response": {
+                    "type": "array",
+                    "items": "Scripture metadata objects",
+                },
+                "example": 'ScriptureGate.list_scriptures(file_type="markdown", limit=10)',
+            },
+
+            "stats": {
+                "purpose": "Get storage statistics",
+                "call_format": {},
+                "response": {
+                    "total": "integer - total scriptures",
+                    "indexed": "integer - scriptures with embeddings",
+                    "by_type": "object - counts by file type",
+                    "total_size_mb": "number - total storage size",
+                },
+                "example": "ScriptureGate.stats()",
+            },
+        },
+
+        "best_practices": [
+            "Use build_context() for RAG - it handles formatting automatically",
+            "Store documents with descriptive titles for better search",
+            "Use tags to categorize related documents",
+            "Set appropriate min_similarity to filter irrelevant results",
+            "Check stats() periodically to monitor storage usage",
+        ],
+    }
+
+
 __all__ = [
     # Initialization
     "init_scripture_db",
@@ -813,4 +931,6 @@ __all__ = [
     # Models
     "Scripture",
     "SCRIPTURE_ROOT",
+    # Documentation
+    "get_info",
 ]

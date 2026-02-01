@@ -652,6 +652,156 @@ def format_ref(mem_type: str, mem_id: int) -> str:
     return f"{mem_type}:{mem_id}"
 
 
+# === Self-Documentation ===
+
+def get_info() -> dict:
+    """
+    Get comprehensive documentation for MemoryGate.
+
+    Returns complete tool documentation including purpose, call formats,
+    expected responses, and domain-specific guidance.
+    """
+    return {
+        "gate": "MemoryGate",
+        "version": "1.0",
+        "purpose": "Persistent semantic memory system for storing and retrieving observations, patterns, concepts, and relationships. Enables agents to remember facts, build knowledge graphs, and search across accumulated knowledge.",
+
+        "concepts": {
+            "observations": "Atomic facts with confidence levels (0-1). The basic unit of memory.",
+            "patterns": "Synthesized understanding across multiple observations. Upserts by category+name.",
+            "concepts": "Named entities in a knowledge graph. Case-insensitive, alias-aware.",
+            "relationships": "Semantic connections between any memory items using ref format.",
+            "chains": "Ordered sequences of items for temporal/causal tracking.",
+            "refs": "Universal reference format: 'type:id' (e.g., 'observation:42', 'concept:Cathedral')",
+        },
+
+        "confidence_guide": {
+            "1.0": "Direct observation, absolute certainty",
+            "0.9-0.99": "Very high confidence, strong evidence",
+            "0.8-0.89": "High confidence, solid evidence",
+            "0.7-0.79": "Good confidence, some uncertainty",
+            "0.5-0.69": "Moderate confidence, competing interpretations",
+            "below_0.5": "Speculative, weak evidence - use sparingly",
+        },
+
+        "recommended_domains": [
+            "technical", "project", "architecture", "decision",
+            "user_preference", "system", "interaction", "error",
+        ],
+
+        "tools": {
+            "search": {
+                "purpose": "Semantic search across all memory types using vector similarity",
+                "call_format": {
+                    "query": {"type": "string", "required": True, "description": "Search query text"},
+                    "limit": {"type": "integer", "required": False, "default": 5, "description": "Max results to return"},
+                    "min_confidence": {"type": "number", "required": False, "default": 0.0, "description": "Minimum confidence threshold (0-1)"},
+                    "domain": {"type": "string", "required": False, "description": "Filter to specific domain"},
+                    "include_cold": {"type": "boolean", "required": False, "default": False, "description": "Include archived/cold tier memories"},
+                },
+                "response": {
+                    "type": "array",
+                    "items": "Memory objects with id, content, confidence, domain, similarity score",
+                },
+                "example": 'MemoryGate.search(query="database migration", limit=5, min_confidence=0.7)',
+            },
+
+            "recall": {
+                "purpose": "List recent observations, optionally filtered by domain",
+                "call_format": {
+                    "domain": {"type": "string", "required": False, "description": "Filter to specific domain"},
+                    "limit": {"type": "integer", "required": False, "default": 10, "description": "Max results"},
+                    "min_confidence": {"type": "number", "required": False, "default": 0.0, "description": "Minimum confidence"},
+                },
+                "response": {
+                    "type": "array",
+                    "items": "Observation objects with id, observation text, confidence, domain, timestamp",
+                },
+                "example": 'MemoryGate.recall(domain="technical", limit=10)',
+            },
+
+            "store_observation": {
+                "purpose": "Store a new observation/fact in memory with embedding for semantic search",
+                "call_format": {
+                    "text": {"type": "string", "required": True, "description": "The observation text to store"},
+                    "confidence": {"type": "number", "required": False, "default": 0.8, "description": "Confidence level 0-1"},
+                    "domain": {"type": "string", "required": False, "description": "Category/domain tag"},
+                    "evidence": {"type": "array", "required": False, "description": "List of supporting evidence strings"},
+                },
+                "response": {
+                    "id": "integer - ID of stored observation",
+                    "ref": "string - Reference in format 'observation:id'",
+                    "status": "string - 'stored' on success",
+                },
+                "example": 'MemoryGate.store_observation(text="User prefers dark mode", confidence=0.95, domain="user_preference")',
+            },
+
+            "get_concept": {
+                "purpose": "Look up a concept by name (case-insensitive, alias-aware)",
+                "call_format": {
+                    "name": {"type": "string", "required": True, "description": "Concept name or alias"},
+                },
+                "response": {
+                    "type": "object",
+                    "fields": "id, name, type, description, domain, status, metadata, relationships",
+                },
+                "example": 'MemoryGate.get_concept(name="Cathedral")',
+            },
+
+            "get_related": {
+                "purpose": "Get items related to a memory reference via relationships",
+                "call_format": {
+                    "ref": {"type": "string", "required": True, "description": "Reference (e.g., 'observation:42', 'concept:Name')"},
+                    "rel_type": {"type": "string", "required": False, "description": "Filter by relationship type"},
+                    "limit": {"type": "integer", "required": False, "default": 50, "description": "Max results"},
+                },
+                "response": {
+                    "type": "array",
+                    "items": "Related items with relationship details (type, weight, direction)",
+                },
+                "example": 'MemoryGate.get_related(ref="observation:42", rel_type="supports")',
+            },
+
+            "add_relationship": {
+                "purpose": "Create a semantic relationship between two memory items",
+                "call_format": {
+                    "from_ref": {"type": "string", "required": True, "description": "Source reference"},
+                    "to_ref": {"type": "string", "required": True, "description": "Target reference"},
+                    "rel_type": {"type": "string", "required": True, "description": "Relationship type (free-form)"},
+                    "weight": {"type": "number", "required": False, "default": 0.5, "description": "Relationship strength 0-1"},
+                    "description": {"type": "string", "required": False, "description": "Description of relationship"},
+                },
+                "response": {
+                    "status": "string - 'created' or 'updated'",
+                    "edge_id": "string - ID of the relationship edge",
+                },
+                "common_rel_types": ["supports", "contradicts", "causes", "enables", "part_of", "related_to", "supersedes"],
+                "example": 'MemoryGate.add_relationship(from_ref="observation:42", to_ref="observation:43", rel_type="supports", weight=0.8)',
+            },
+
+            "get_stats": {
+                "purpose": "Get memory system statistics and counts",
+                "call_format": {},
+                "response": {
+                    "counts": "Object with observation/pattern/concept/document counts",
+                    "domains": "Object mapping domain names to counts",
+                    "ai_instances": "Array of registered AI agents",
+                    "tiers": "Object with hot/cold tier breakdowns",
+                },
+                "example": "MemoryGate.get_stats()",
+            },
+        },
+
+        "best_practices": [
+            "Always search before storing to avoid duplicates",
+            "Use appropriate confidence levels - don't default everything to 1.0",
+            "Tag observations with domains for better organization",
+            "Create relationships to build a connected knowledge graph",
+            "Use patterns to synthesize understanding across observations",
+        ],
+    }
+
+
 __all__ = [
     # Lifecycle
     "initialize",
@@ -685,4 +835,6 @@ __all__ = [
     # References
     "get_by_ref",
     "format_ref",
+    # Documentation
+    "get_info",
 ]

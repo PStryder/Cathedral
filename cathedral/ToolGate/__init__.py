@@ -185,6 +185,104 @@ def get_dependencies() -> List[str]:
     return []
 
 
+def get_info() -> dict:
+    """
+    Get comprehensive documentation for ToolGate and the entire tool system.
+
+    Returns complete documentation including protocol format, policy system,
+    available gates, and how to discover tool documentation.
+    """
+    initialize()
+
+    # Get tool counts per gate
+    all_tools = ToolRegistry.list_tools()
+    gate_tools = {}
+    for tool in all_tools:
+        gate = tool.gate
+        if gate not in gate_tools:
+            gate_tools[gate] = []
+        gate_tools[gate].append(tool.name)
+
+    return {
+        "gate": "ToolGate",
+        "version": "1.0",
+        "purpose": "Provider-agnostic tool calling protocol for AI agents interacting with Cathedral Gates. Handles tool discovery, validation, policy enforcement, and execution orchestration.",
+
+        "protocol": {
+            "description": "Tools are called via JSON objects in model responses",
+            "call_format": {
+                "type": "tool_call",
+                "id": "string - unique call ID (auto-generated if omitted)",
+                "tool": "string - Gate.method format (e.g., 'MemoryGate.search')",
+                "args": "object - method arguments",
+            },
+            "result_format": {
+                "type": "tool_result",
+                "id": "string - matches call ID",
+                "ok": "boolean - true if successful",
+                "result": "any - method return value (if ok=true)",
+                "error": "string - error message (if ok=false)",
+            },
+            "example_call": '{"type": "tool_call", "id": "tc_001", "tool": "MemoryGate.search", "args": {"query": "python tutorials"}}',
+            "example_result": '{"type": "tool_result", "id": "tc_001", "ok": true, "result": {"items": [...], "total": 5}}',
+        },
+
+        "policy_classes": {
+            "description": "Tools are categorized by security policy. Only enabled policies can be called.",
+            "classes": {
+                "read_only": "Safe read operations - no side effects (e.g., search, list, get)",
+                "write": "Modifies data within Cathedral (e.g., store, update, delete)",
+                "network": "External network access (e.g., web search, API calls)",
+                "privileged": "System operations requiring elevated trust (e.g., shell commands)",
+            },
+            "note": "The orchestrator enforces policies at runtime. Calls to disabled policy tools return errors.",
+        },
+
+        "available_gates": {
+            gate: {
+                "tool_count": len(tools),
+                "tools": tools,
+                "info_endpoint": f"{gate}.get_info",
+            }
+            for gate, tools in sorted(gate_tools.items())
+        },
+
+        "discovering_tools": {
+            "description": "Each gate provides a get_info() method with comprehensive documentation",
+            "steps": [
+                "1. Call ToolGate.get_info() (this) to see available gates",
+                "2. Call {Gate}.get_info() for detailed tool documentation",
+                "3. Each get_info() includes: purpose, call_format, response schema, examples",
+            ],
+            "example": "To learn about memory tools, call MemoryGate.get_info()",
+        },
+
+        "orchestrator": {
+            "description": "The ToolOrchestrator executes tool calls in a loop until completion",
+            "features": [
+                "Parses tool calls from model output",
+                "Validates arguments against schemas",
+                "Enforces policy restrictions",
+                "Handles parallel and sequential calls",
+                "Injects results back into conversation",
+            ],
+            "limits": {
+                "max_iterations": "Default 6 - prevents infinite loops",
+                "max_calls_per_step": "Default 5 - batch size limit",
+            },
+        },
+
+        "best_practices": [
+            "Always call get_info() on a gate before using its tools",
+            "Use specific tool names (Gate.method) not just method names",
+            "Check 'ok' field in results before using 'result' data",
+            "Handle errors gracefully - tools can fail",
+            "Prefer read_only tools when write isn't needed",
+            "Use parallel calls for independent operations",
+        ],
+    }
+
+
 def list_tools(
     policy_filter: Optional[Set[PolicyClass]] = None,
     gate_filter: Optional[str] = None,
@@ -256,6 +354,7 @@ __all__ = [
     "is_healthy",
     "get_health_status",
     "get_dependencies",
+    "get_info",
     # Models
     "PolicyClass",
     "ToolCall",
