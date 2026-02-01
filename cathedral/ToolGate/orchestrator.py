@@ -30,6 +30,37 @@ _log = GateLogger.get("ToolGate")
 
 
 # =============================================================================
+# Result Serialization
+# =============================================================================
+
+
+def _serialize_result(result: Any) -> Any:
+    """
+    Convert tool results to JSON-serializable format.
+
+    Handles Pydantic models, lists, and nested structures.
+    """
+    # Check for Pydantic BaseModel (v2)
+    if hasattr(result, "model_dump"):
+        return result.model_dump(mode="json")
+
+    # Check for older to_dict method
+    if hasattr(result, "to_dict"):
+        return result.to_dict()
+
+    # Handle lists/tuples of results
+    if isinstance(result, (list, tuple)):
+        return [_serialize_result(item) for item in result]
+
+    # Handle dicts with potential nested models
+    if isinstance(result, dict):
+        return {k: _serialize_result(v) for k, v in result.items()}
+
+    # Primitives pass through
+    return result
+
+
+# =============================================================================
 # Gate Dispatch
 # =============================================================================
 
@@ -200,6 +231,10 @@ class ToolOrchestrator:
             await self._emit("tool", f"Executing {call.tool}")
             result = await _dispatch_tool(tool, call.args)
             _log.info(f"Tool {call.tool} executed successfully")
+
+            # Convert Pydantic models to dicts for JSON serialization
+            result = _serialize_result(result)
+
             return ToolResult.success(call.id, result)
 
         except Exception as e:

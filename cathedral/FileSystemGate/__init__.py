@@ -804,6 +804,11 @@ def delete(folder_id: str, relative_path: str, recursive: bool = False) -> Opera
     return FileSystemGate.delete(folder_id, relative_path, recursive)
 
 
+def info(folder_id: str, relative_path: str) -> OperationResult:
+    """Get file or directory information."""
+    return FileSystemGate.info(folder_id, relative_path)
+
+
 def list_backups(folder_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
     """List backups."""
     return FileSystemGate.list_backups(folder_id, limit)
@@ -837,6 +842,7 @@ __all__ = [
     "write_file",
     "mkdir",
     "delete",
+    "info",
     # Backup
     "list_backups",
     "restore_backup",
