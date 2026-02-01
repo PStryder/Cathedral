@@ -224,6 +224,66 @@ function scrollToBottom() {
 
 // ========== Tool Execution Display ==========
 
+// Track active tool calls for updating status
+const activeToolCalls = new Map();
+
+function appendToolCallIndicator(toolName) {
+    const div = document.createElement('div');
+    div.className = 'flex justify-center my-2 message-enter';
+    div.dataset.toolCall = toolName;
+
+    const id = `tool-${Date.now()}-${toolName}`;
+    div.id = id;
+
+    div.innerHTML = `
+        <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-900/40 border border-red-500/50">
+            <span class="inline-block w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+            <span class="text-xs font-medium text-red-300 mono">${escapeHtml(toolName)}</span>
+            <span class="text-xs text-red-400/70 tool-elapsed"></span>
+        </div>
+    `;
+
+    elements.messagesList.appendChild(div);
+    scrollToBottom();
+
+    // Track this call
+    activeToolCalls.set(toolName, { id, startTime: Date.now() });
+
+    return div;
+}
+
+function updateToolCallIndicator(toolName, success, elapsedMs) {
+    const call = activeToolCalls.get(toolName);
+    if (!call) return;
+
+    const div = document.getElementById(call.id);
+    if (!div) return;
+
+    const elapsed = elapsedMs || (Date.now() - call.startTime);
+    const elapsedStr = elapsed >= 1000 ? `${(elapsed / 1000).toFixed(1)}s` : `${elapsed}ms`;
+
+    if (success) {
+        div.innerHTML = `
+            <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-900/40 border border-emerald-500/50">
+                <span class="text-emerald-400">✓</span>
+                <span class="text-xs font-medium text-emerald-300 mono">${escapeHtml(toolName)}</span>
+                <span class="text-xs text-emerald-400/70">${elapsedStr}</span>
+            </div>
+        `;
+    } else {
+        div.innerHTML = `
+            <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-900/40 border border-red-500/50">
+                <span class="text-red-400">✗</span>
+                <span class="text-xs font-medium text-red-300 mono">${escapeHtml(toolName)}</span>
+                <span class="text-xs text-red-400/70">${elapsedStr}</span>
+            </div>
+        `;
+    }
+
+    // Remove from tracking
+    activeToolCalls.delete(toolName);
+}
+
 function appendToolExecution(toolName, args, status = 'calling') {
     const div = document.createElement('div');
     div.className = 'flex justify-start message-enter';
@@ -563,19 +623,35 @@ function connectEventSource() {
 
     eventSource.addEventListener('tool', (e) => {
         const data = JSON.parse(e.data);
-        Console.tool(data.message);
+        const msg = data.message || '';
 
-        // Render tool execution inline during streaming
-        if (state.isStreaming && state.toolsEnabled) {
-            // Parse tool event message for display
-            const msg = data.message || '';
-            if (msg.includes('Executing')) {
-                // Extract tool name if possible
-                const match = msg.match(/Executing (\S+)/);
-                const toolName = match ? match[1] : 'Tool';
-                appendToolExecution(toolName, null, 'calling');
-            } else if (msg.includes('Malformed')) {
-                appendToolExecution('JSON Parse Error', null, 'error');
+        // Handle structured tool events for inline indicators
+        if (msg.startsWith('TOOL_START:')) {
+            const toolName = msg.split(':')[1];
+            Console.tool(`Calling ${toolName}...`);
+            if (state.isStreaming) {
+                appendToolCallIndicator(toolName);
+            }
+        } else if (msg.startsWith('TOOL_OK:')) {
+            const parts = msg.split(':');
+            const toolName = parts[1];
+            const elapsedMs = parseInt(parts[2]) || 0;
+            Console.tool(`${toolName} completed (${elapsedMs}ms)`);
+            updateToolCallIndicator(toolName, true, elapsedMs);
+        } else if (msg.startsWith('TOOL_ERROR:')) {
+            const parts = msg.split(':');
+            const toolName = parts[1];
+            const elapsedMs = parseInt(parts[2]) || 0;
+            Console.tool(`${toolName} failed (${elapsedMs}ms)`);
+            updateToolCallIndicator(toolName, false, elapsedMs);
+        } else {
+            // Legacy format or other messages
+            Console.tool(msg);
+            if (state.isStreaming && state.toolsEnabled) {
+                if (msg.includes('Malformed')) {
+                    appendToolCallIndicator('JSON Parse Error');
+                    setTimeout(() => updateToolCallIndicator('JSON Parse Error', false, 0), 100);
+                }
             }
         }
     });

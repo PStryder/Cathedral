@@ -231,9 +231,13 @@ class ToolOrchestrator:
 
         # Execute
         try:
-            await self._emit("tool", f"Executing {call.tool}")
+            import time
+            start_time = time.time()
+            await self._emit("tool", f"TOOL_START:{call.tool}")
             result = await _dispatch_tool(tool, call.args)
-            _log.info(f"Tool {call.tool} executed successfully")
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            await self._emit("tool", f"TOOL_OK:{call.tool}:{elapsed_ms}")
+            _log.info(f"Tool {call.tool} executed successfully in {elapsed_ms}ms")
 
             # Convert Pydantic models to dicts for JSON serialization
             result = _serialize_result(result)
@@ -241,6 +245,8 @@ class ToolOrchestrator:
             return ToolResult.success(call.id, result)
 
         except Exception as e:
+            elapsed_ms = int((time.time() - start_time) * 1000) if 'start_time' in locals() else 0
+            await self._emit("tool", f"TOOL_ERROR:{call.tool}:{elapsed_ms}")
             _log.error(f"Tool {call.tool} failed: {e}")
             return ToolResult.failure(call.id, str(e))
 
