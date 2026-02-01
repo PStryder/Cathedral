@@ -624,12 +624,18 @@ def validate_command(command: str) -> Tuple[bool, Optional[str]]:
     return ShellGate.validate_command(command)
 
 
+def get_health_status() -> Dict[str, Any]:
+    """Get detailed health information."""
+    return ShellGate.get_health_status()
+
+
 __all__ = [
     # Class
     "ShellGate",
     # Lifecycle
     "initialize",
     "is_initialized",
+    "get_health_status",
     # Execution
     "execute",
     "execute_async",

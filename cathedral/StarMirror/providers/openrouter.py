@@ -27,15 +27,17 @@ from cathedral.StarMirror.MediaGate import (
 env_path = Path(__file__).resolve().parents[3] / ".env"
 load_dotenv(dotenv_path=env_path)
 
-API_URL = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_MODEL = "openai/gpt-4o-2024-11-20"
-DEFAULT_VISION_MODEL = "openai/gpt-4o-2024-11-20"
+# Configurable API endpoint - defaults to OpenRouter
+API_URL = os.getenv("LLM_API_URL", "https://openrouter.ai/api/v1/chat/completions")
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "openai/gpt-4o-2024-11-20")
+DEFAULT_VISION_MODEL = os.getenv("VISION_MODEL", "openai/gpt-4o-2024-11-20")
 
 def _get_api_key() -> str:
-    api_key = os.getenv("OPENROUTER_API_KEY")
+    # Try LLM_API_KEY first, fall back to OPENROUTER_API_KEY
+    api_key = os.getenv("LLM_API_KEY") or os.getenv("OPENROUTER_API_KEY")
     if not api_key:
         raise RuntimeError(
-            "OPENROUTER_API_KEY is not set. Ensure your .env file exists and contains the key."
+            "LLM_API_KEY or OPENROUTER_API_KEY is not set. Ensure your .env file exists and contains the key."
         )
     return api_key
 

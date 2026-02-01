@@ -8,6 +8,8 @@ from cathedral import (
     ShellGate,
     BrowserGate,
     ScriptureGate,
+    SubAgentGate,
+    ToolGate,
     MCPClient,
     Config,
 )
@@ -35,12 +37,17 @@ async def startup(emit_event):
     else:
         _log.warning("DATABASE_URL not set - conversation/scripture DB disabled")
 
+    # Initialize all gates explicitly
     MemoryGate.initialize()
     PersonalityGate.initialize()
     SecurityManager.initialize()
     FileSystemGate.initialize()
     ShellGate.initialize()
+    BrowserGate.initialize()
+    ScriptureGate.initialize()
+    ToolGate.initialize()
     MCPClient.initialize()
+    # SubAgentGate initializes lazily via get_manager()
 
     # Connect MCP servers with auto_connect enabled
     try:

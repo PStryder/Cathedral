@@ -192,23 +192,34 @@ def create_router() -> APIRouter:
         }
 
     @router.get("/api/health/summary")
-    async def api_health_summary(response: Response) -> Dict[str, Any]:
+    async def api_health_summary() -> Dict[str, Any]:
         """
         Get a quick health summary (just healthy/unhealthy per gate).
 
-        Returns 200 when healthy, 503 when unhealthy.
+        Always returns 200 - health status is in the payload.
+        This is the Docker healthcheck endpoint; returning 503 for optional
+        gates causes container instability during development.
         """
         all_healthy, gates = _collect_health_data()
 
         summary = {name: status.get("healthy", False) for name, status in gates.items()}
 
-        if not all_healthy:
-            response.status_code = 503
-
+        # Always return 200 - health info is in the payload
+        # Docker healthcheck just needs to know the server is alive
         return {
             "healthy": all_healthy,
             "gates": summary,
         }
+
+    @router.get("/api/health/live")
+    async def api_health_live() -> Dict[str, bool]:
+        """
+        Simple liveness probe - just confirms server is running.
+
+        Always returns 200 with {"alive": true}.
+        Use this for Docker healthcheck if you want minimal overhead.
+        """
+        return {"alive": True}
 
     return router
 

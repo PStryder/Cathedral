@@ -49,6 +49,8 @@ from .websocket_server import (
 from .models import ExtensionMessage, ExtensionResponse
 
 __all__ = [
+    # Initialization
+    "initialize",
     # Models
     "SearchProvider",
     "FetchMode",
@@ -234,7 +236,7 @@ class BrowserGate:
             "default_fetch_mode": self.config.default_fetch_mode.value,
             "available_providers": self.list_providers(),
             "websocket_port": ws_server.port if ws_running else None,
-            "websocket_connections": len(ws_server.connections) if ws_running else 0,
+            "websocket_connections": ws_server.client_count if ws_running else 0,
         }
 
         return build_health_status(
@@ -255,6 +257,18 @@ _log = GateLogger.get("BrowserGate")
 
 # Global instance
 _browser: Optional[BrowserGate] = None
+_initialized: bool = False
+
+
+def initialize() -> None:
+    """Initialize BrowserGate (idempotent)."""
+    global _initialized
+    if _initialized:
+        return
+    # Pre-create the browser instance
+    get_browser()
+    _initialized = True
+    _log.info("BrowserGate initialized")
 
 
 def get_browser(config: Optional[BrowserConfig] = None) -> BrowserGate:

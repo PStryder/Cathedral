@@ -439,18 +439,17 @@ class KnowledgeDiscoveryService:
         """
         embedding_str = self._format_embedding_for_pgvector(embedding)
 
-        query = text("""
-            SELECT source_id, 1 - (embedding <=> :embedding::vector) as similarity
+        query = text(f"""
+            SELECT source_id, 1 - (embedding <=> '{embedding_str}'::vector) as similarity
             FROM embeddings
             WHERE tenant_id = 'cathedral'
               AND source_type = :source_type
               AND embedding IS NOT NULL
-            ORDER BY embedding <=> :embedding::vector
+            ORDER BY embedding <=> '{embedding_str}'::vector
             LIMIT :limit
         """)
 
         result = await session.execute(query, {
-            "embedding": embedding_str,
             "source_type": source_type,
             "limit": limit
         })
@@ -474,17 +473,16 @@ class KnowledgeDiscoveryService:
         embedding_str = self._format_embedding_for_pgvector(embedding)
 
         query = text(f"""
-            SELECT me.message_uid, 1 - (me.embedding <=> :embedding::vector) as similarity
+            SELECT me.message_uid, 1 - (me.embedding <=> '{embedding_str}'::vector) as similarity
             FROM {tables['embeddings']} me
             JOIN {tables['messages']} m ON m.message_uid = me.message_uid
             WHERE m.thread_uid != :exclude_thread_uid
               AND me.embedding IS NOT NULL
-            ORDER BY me.embedding <=> :embedding::vector
+            ORDER BY me.embedding <=> '{embedding_str}'::vector
             LIMIT :limit
         """)
 
         result = await session.execute(query, {
-            "embedding": embedding_str,
             "exclude_thread_uid": exclude_thread_uid,
             "limit": limit
         })
@@ -665,14 +663,14 @@ class KnowledgeDiscoveryService:
         embedding_str = self._format_embedding_for_pgvector(embedding)
 
         query = text(f"""
-            SELECT me.message_uid, 1 - (me.embedding <=> :embedding::vector) as similarity
+            SELECT me.message_uid, 1 - (me.embedding <=> '{embedding_str}'::vector) as similarity
             FROM {tables['embeddings']} me
             WHERE me.embedding IS NOT NULL
-            ORDER BY me.embedding <=> :embedding::vector
+            ORDER BY me.embedding <=> '{embedding_str}'::vector
             LIMIT :limit
         """)
 
-        result = await session.execute(query, {"embedding": embedding_str, "limit": limit})
+        result = await session.execute(query, {"limit": limit})
         return [(row[0], float(row[1])) for row in result.fetchall()]
 
 

@@ -814,11 +814,17 @@ def restore_backup(backup_id: str, overwrite: bool = True) -> Tuple[bool, str]:
     return FileSystemGate.restore_backup(backup_id, overwrite)
 
 
+def get_health_status() -> Dict[str, Any]:
+    """Get detailed health information."""
+    return FileSystemGate.get_health_status()
+
+
 __all__ = [
     # Class
     "FileSystemGate",
     # Health
     "is_initialized",
+    "get_health_status",
     # Folder management
     "initialize",
     "add_folder",

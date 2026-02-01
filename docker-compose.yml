@@ -79,8 +79,9 @@ services:
     volumes:
       - cathedral_data:/app/data
       - cathedral_models:/app/models
-      # Mount external MemoryGate library (comment out if not available)
-      - ${MEMORYGATE_HOST_PATH:-f:/hexylab/lv_stack/memorygate}:/app/memorygate:ro
+      # Mount external MemoryGate library (set MEMORYGATE_HOST_PATH in .env)
+      # Comment out if not using external MemoryGate
+      # - ${MEMORYGATE_HOST_PATH}:/app/memorygate:ro
     ports:
       - "${APP_PORT:-8000}:8000"
     networks:

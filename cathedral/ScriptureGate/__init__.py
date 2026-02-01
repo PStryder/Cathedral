@@ -119,6 +119,21 @@ def init_scripture_db() -> None:
     _ensure_tables()
 
 
+_gate_initialized: bool = False
+
+
+def initialize() -> None:
+    """Initialize ScriptureGate (idempotent). Safe to call without DATABASE_URL."""
+    global _gate_initialized
+    if _gate_initialized:
+        return
+    # Only initialize tables if database is available
+    if db_initialized():
+        _ensure_tables()
+    _gate_initialized = True
+    _log.info("ScriptureGate initialized")
+
+
 # ==================== Health Checks ====================
 
 

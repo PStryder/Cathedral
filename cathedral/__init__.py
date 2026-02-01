@@ -7,7 +7,6 @@ from . import (
     MetadataChannel,
     SubAgentGate,
     PersonalityGate,
-    SecurityManager,
     FileSystemGate,
     ShellGate,
     BrowserGate,
@@ -15,6 +14,7 @@ from . import (
     ToolGate,
     MCPClient,
 )
+from .SecurityManager import SecurityManager
 
 __all__ = [
     "process_input",

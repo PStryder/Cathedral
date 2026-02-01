@@ -117,3 +117,17 @@ app.include_router(memory.create_router(templates, MemoryGate, emit_event))
 app.include_router(subagent.create_router(templates, SubAgentGate, emit_event))
 app.include_router(toolgate.create_router(templates))
 app.include_router(mcp.create_router(templates, MCPClient, emit_event))
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", "8000"))
+
+    uvicorn.run(
+        "altar.run:app",
+        host=host,
+        port=port,
+        reload=os.getenv("DEBUG", "false").lower() == "true",
+    )
