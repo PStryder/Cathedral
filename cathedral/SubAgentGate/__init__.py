@@ -397,6 +397,59 @@ class SubAgentManager:
         self._check_agent(agent)
         return agent.result
 
+    def prompt(
+        self,
+        agent_id: str,
+        message: str,
+        **kwargs
+    ) -> Optional[str]:
+        """
+        Send a follow-up prompt to a completed agent.
+
+        Creates a new agent that continues the conversation from where
+        the previous agent left off, using the prior exchange as context.
+
+        Args:
+            agent_id: ID of the completed agent to continue
+            message: Follow-up message/prompt
+            **kwargs: Additional args passed to spawn
+
+        Returns:
+            New agent ID if successful, None if agent not found or not completed
+        """
+        agent = self.agents.get(agent_id)
+        if not agent:
+            return None
+
+        # Can only prompt completed agents
+        if agent.status != AgentStatus.COMPLETED:
+            return None
+
+        # Build context from previous exchange
+        prior_context = agent.context.copy() if agent.context else {}
+
+        # Add conversation history to context
+        conversation_history = prior_context.get("conversation_history", [])
+        conversation_history.append({
+            "role": "user",
+            "content": agent.task,
+        })
+        conversation_history.append({
+            "role": "assistant",
+            "content": agent.result or "",
+        })
+        prior_context["conversation_history"] = conversation_history
+        prior_context["parent_agent_id"] = agent_id
+
+        # Spawn new agent with continued context
+        return self.spawn(
+            task=message,
+            context=prior_context,
+            agent_type=agent.agent_type.value,
+            working_dir=agent.working_dir,
+            **kwargs
+        )
+
     def cancel(self, agent_id: str) -> bool:
         """Cancel a running agent."""
         agent = self.agents.get(agent_id)
@@ -585,6 +638,24 @@ def cancel(agent_id: str) -> bool:
     return get_manager().cancel(agent_id)
 
 
+def prompt(agent_id: str, message: str, **kwargs) -> Optional[str]:
+    """
+    Send a follow-up prompt to a completed agent.
+
+    Creates a new agent continuing the conversation from where
+    the previous agent left off.
+
+    Args:
+        agent_id: ID of the completed agent to continue
+        message: Follow-up message/prompt
+        **kwargs: Additional args passed to spawn
+
+    Returns:
+        New agent ID if successful, None if agent not found or not completed
+    """
+    return get_manager().prompt(agent_id, message, **kwargs)
+
+
 def check_completed() -> List[str]:
     """Check for newly completed agents."""
     return get_manager().check_completed()
@@ -646,6 +717,7 @@ __all__ = [
     "result",
     "list_agents",
     "cancel",
+    "prompt",
     "check_completed",
     # Health/availability
     "is_claude_code_available",

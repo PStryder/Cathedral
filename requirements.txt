@@ -80,3 +80,4 @@ watchfiles==1.0.5
 websockets==15.0.1
 pgvector==0.3.6
 alembic==1.13.1
+duckduckgo-search>=7.0.0

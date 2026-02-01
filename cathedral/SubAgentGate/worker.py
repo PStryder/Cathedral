@@ -136,6 +136,10 @@ async def run_task(task_data: dict) -> str:
     personality_id = task_data.get("personality")
     model = task_data.get("model")
 
+    # Extract conversation history if this is a continued conversation
+    conversation_history = context.pop("conversation_history", None)
+    parent_agent_id = context.pop("parent_agent_id", None)
+
     # Load personality if specified
     personality = None
     if personality_id:
@@ -156,7 +160,14 @@ async def run_task(task_data: dict) -> str:
         model = personality.llm_config.model
     else:
         # Build default system prompt for bounded agent
-        default_system = """You are a focused sub-agent with a specific task to complete.
+        if conversation_history:
+            # Continued conversation - adjust prompt
+            default_system = """You are a focused sub-agent continuing a conversation.
+You have context from a previous exchange. Continue assisting based on the
+new follow-up message while maintaining continuity with the prior discussion.
+Be concise but comprehensive."""
+        else:
+            default_system = """You are a focused sub-agent with a specific task to complete.
 Complete the task thoroughly and return your findings/results.
 Be concise but comprehensive. Focus only on the assigned task."""
 
@@ -166,15 +177,26 @@ Be concise but comprehensive. Focus only on the assigned task."""
             system_prompt = default_system
 
     # Add context if provided (safely truncated to prevent prompt explosion)
+    # Note: conversation_history was already popped out
     if context:
         context_str = _format_context(context)
         if context_str:
             system_prompt += f"\n\nContext:\n{context_str}"
 
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": task}
-    ]
+    # Build messages array
+    messages = [{"role": "system", "content": system_prompt}]
+
+    # Add conversation history if this is a continued conversation
+    if conversation_history:
+        _log.info(f"Continuing from parent agent {parent_agent_id}, {len(conversation_history)} prior turns")
+        for turn in conversation_history:
+            role = turn.get("role", "user")
+            content = turn.get("content", "")
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": content})
+
+    # Add current task/message
+    messages.append({"role": "user", "content": task})
 
     # Build kwargs
     kwargs = {

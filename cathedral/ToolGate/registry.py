@@ -387,6 +387,16 @@ SUBAGENTGATE_TOOLS: List[Dict[str, Any]] = [
             "agent_id": ArgSchema(type="string", description="Agent ID", required=True),
         },
     },
+    {
+        "method": "prompt",
+        "description": "Send a follow-up prompt to a completed sub-agent, continuing the conversation",
+        "policy": PolicyClass.WRITE,
+        "is_async": False,
+        "args": {
+            "agent_id": ArgSchema(type="string", description="ID of the completed agent to continue", required=True),
+            "message": ArgSchema(type="string", description="Follow-up message/prompt", required=True),
+        },
+    },
 ]
 
 

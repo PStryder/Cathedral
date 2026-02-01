@@ -336,6 +336,8 @@ class ToolOrchestrator:
                 # Genuine non-tool response - yield and exit
                 if remaining_text:
                     yield remaining_text
+                # Clear current_response to prevent duplicate yield after loop
+                current_response = ""
                 break
 
             # Enforce per-step limit
