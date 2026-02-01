@@ -624,6 +624,11 @@ def validate_command(command: str) -> Tuple[bool, Optional[str]]:
     return ShellGate.validate_command(command)
 
 
+def estimate_risk(command: str) -> Dict[str, Any]:
+    """Estimate the risk level of a command."""
+    return ShellGate.estimate_risk(command)
+
+
 def get_health_status() -> Dict[str, Any]:
     """Get detailed health information."""
     return ShellGate.get_health_status()
@@ -646,6 +651,7 @@ __all__ = [
     "get_history",
     # Security
     "validate_command",
+    "estimate_risk",
     # Models
     "CommandResult",
     "CommandExecution",
