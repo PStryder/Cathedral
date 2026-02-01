@@ -93,7 +93,7 @@ async def handle_pre_command(
                 yield f"error loading glyph: {e}"
         return _gen()
 
-    # === MemoryGate Commands ===
+    # === Memory Search (unified across all sources) ===
 
     if lowered.startswith("/search "):
         async def _gen() -> AsyncGenerator[str, None]:
@@ -102,13 +102,44 @@ async def handle_pre_command(
                 yield "usage: /search <query>"
                 return
             await _emit(ctx, "memory", f"Searching: {query[:50]}...")
-            results = MemoryGate.search(query, limit=5)
-            result_count = len(results) if results else 0
-            await _emit(ctx, "memory", f"Found {result_count} results")
-            yield format_search_results(results)
+
+            # Use unified search across all sources (includes all conversation threads)
+            results = await ctx.memory.unified_search(
+                query,
+                sources=None,  # All sources
+                limit_per_source=3,
+                min_similarity=0.3
+            )
+
+            if not results:
+                yield "No results found across any memory source."
+                return
+
+            await _emit(ctx, "memory", f"Found {len(results)} results")
+            yield f"Found {len(results)} results:\n\n"
+
+            # Group by source type for display
+            for r in results:
+                source_icon = {
+                    MemorySource.CONVERSATION: "[C]",
+                    MemorySource.SUMMARY: "[S]",
+                    MemorySource.OBSERVATION: "[O]",
+                    MemorySource.PATTERN: "[P]",
+                    MemorySource.CONCEPT: "[K]",
+                    MemorySource.DOCUMENT: "[D]"
+                }.get(r.source, "[?]")
+
+                # Truncate content for display
+                content_preview = r.content[:120]
+                if len(r.content) > 120:
+                    content_preview += "..."
+
+                confidence_str = f" ({r.confidence:.0%})" if r.confidence else ""
+                yield f"{source_icon} [{r.similarity:.2f}]{confidence_str} {content_preview}\n"
+                yield f"    ref: {r.ref}\n\n"
         return _gen()
 
-    # === Unified Search (conversation + MemoryGate) ===
+    # === Unified Search (alias for /search, kept for backwards compatibility) ===
 
     if lowered.startswith("/usearch "):
         async def _gen() -> AsyncGenerator[str, None]:
