@@ -218,19 +218,30 @@ def store_observation(
     domain: str = None,
     evidence: list = None
 ) -> Optional[dict]:
-    """Store an observation with embedding."""
+    """
+    Store an observation with embedding.
+
+    Returns:
+        Dict with observation data including 'ref' (e.g., 'observation:123')
+    """
     ctx = get_context()
     if not ctx:
         return None
 
     try:
-        return memory_service.memory_store(
+        result = memory_service.memory_store(
             observation=text,
             confidence=confidence,
             domain=domain,
             evidence=evidence,
             context=ctx
         )
+        # Ensure ref is in response
+        if result and "ref" not in result:
+            obs_id = result.get("id") or result.get("observation_id")
+            if obs_id:
+                result["ref"] = f"observation:{obs_id}"
+        return result
     except Exception as e:
         _log.error(f"store_observation failed: {e}")
         return None
@@ -243,13 +254,18 @@ def store_pattern(
     confidence: float = 0.8,
     evidence_ids: list = None
 ) -> Optional[dict]:
-    """Create or update a pattern (synthesized understanding)."""
+    """
+    Create or update a pattern (synthesized understanding).
+
+    Returns:
+        Dict with pattern data including 'ref' (e.g., 'pattern:123')
+    """
     ctx = get_context()
     if not ctx:
         return None
 
     try:
-        return memory_service.memory_update_pattern(
+        result = memory_service.memory_update_pattern(
             category=category,
             pattern_name=name,
             pattern_text=text,
@@ -257,6 +273,12 @@ def store_pattern(
             evidence_observation_ids=evidence_ids,
             context=ctx
         )
+        # Ensure ref is in response
+        if result and "ref" not in result:
+            pattern_id = result.get("id") or result.get("pattern_id")
+            if pattern_id:
+                result["ref"] = f"pattern:{pattern_id}"
+        return result
     except Exception as e:
         _log.error(f"store_pattern failed: {e}")
         return None
@@ -269,13 +291,19 @@ def store_concept(
     domain: str = None,
     status: str = None
 ) -> Optional[dict]:
-    """Store a concept in the knowledge graph."""
+    """
+    Store a concept in the knowledge graph.
+
+    Returns:
+        Dict with concept data including 'ref' (e.g., 'concept:Cathedral')
+        Note: concept refs use name, not numeric ID
+    """
     ctx = get_context()
     if not ctx:
         return None
 
     try:
-        return memory_service.memory_store_concept(
+        result = memory_service.memory_store_concept(
             name=name,
             concept_type=concept_type,
             description=description,
@@ -283,6 +311,12 @@ def store_concept(
             status=status,
             context=ctx
         )
+        # Ensure ref is in response (concepts use name as ref)
+        if result and "ref" not in result:
+            concept_name = result.get("name") or name
+            if concept_name:
+                result["ref"] = f"concept:{concept_name}"
+        return result
     except Exception as e:
         _log.error(f" store_concept failed: {e}")
         return None
@@ -440,13 +474,18 @@ def add_concept_relationship(
     weight: float = 0.5,
     description: str = None
 ) -> Optional[dict]:
-    """Create a relationship between concepts."""
+    """
+    Create a relationship between concepts.
+
+    Returns:
+        Dict with relationship data including concept refs
+    """
     ctx = get_context()
     if not ctx:
         return None
 
     try:
-        return memory_service.memory_add_concept_relationship(
+        result = memory_service.memory_add_concept_relationship(
             from_concept=from_concept,
             to_concept=to_concept,
             rel_type=rel_type,
@@ -454,6 +493,15 @@ def add_concept_relationship(
             description=description,
             context=ctx
         )
+        # Ensure refs are in response
+        if result:
+            if "from_ref" not in result:
+                result["from_ref"] = f"concept:{from_concept}"
+            if "to_ref" not in result:
+                result["to_ref"] = f"concept:{to_concept}"
+            if "rel_type" not in result:
+                result["rel_type"] = rel_type
+        return result
     except Exception as e:
         _log.error(f" add_concept_relationship failed: {e}")
         return None
@@ -491,13 +539,18 @@ def add_relationship(
     weight: float = 0.5,
     description: str = None
 ) -> Optional[dict]:
-    """Create a relationship between two memories (any type)."""
+    """
+    Create a relationship between two memories (any type).
+
+    Returns:
+        Dict with relationship data including 'edge_id' and refs
+    """
     ctx = get_context()
     if not ctx:
         return None
 
     try:
-        return memory_service.memory_add_relationship(
+        result = memory_service.memory_add_relationship(
             from_ref=from_ref,
             to_ref=to_ref,
             rel_type=rel_type,
@@ -505,6 +558,15 @@ def add_relationship(
             description=description,
             context=ctx
         )
+        # Ensure refs are in response
+        if result:
+            if "from_ref" not in result:
+                result["from_ref"] = from_ref
+            if "to_ref" not in result:
+                result["to_ref"] = to_ref
+            if "rel_type" not in result:
+                result["rel_type"] = rel_type
+        return result
     except Exception as e:
         _log.error(f" add_relationship failed: {e}")
         return None
@@ -781,7 +843,15 @@ def append_to_anchor_chain(
 # === Reference Operations ===
 
 def get_by_ref(ref: str) -> Optional[dict]:
-    """Get a memory by its reference (e.g., 'observation:42')."""
+    """
+    Get a memory by its reference.
+
+    Args:
+        ref: Reference string (e.g., 'observation:42', 'concept:Cathedral')
+
+    Returns:
+        Memory dict with full data, or None if not found
+    """
     ctx = get_context()
     if not ctx:
         return None
@@ -794,6 +864,39 @@ def get_by_ref(ref: str) -> Optional[dict]:
     except Exception as e:
         _log.error(f" get_by_ref failed: {e}")
         return None
+
+
+def get_many_by_refs(refs: List[str]) -> List[dict]:
+    """
+    Get multiple memories by their references in a single call.
+
+    Args:
+        refs: List of reference strings (e.g., ['observation:42', 'concept:Cathedral'])
+
+    Returns:
+        List of memory dicts (may be fewer than requested if some not found)
+    """
+    ctx = get_context()
+    if not ctx:
+        return []
+
+    if not refs:
+        return []
+
+    try:
+        result = memory_service.memory_get_many_by_refs(
+            refs=refs,
+            context=ctx
+        )
+        # Handle various response formats
+        if isinstance(result, list):
+            return result
+        elif isinstance(result, dict):
+            return result.get("items", result.get("memories", []))
+        return []
+    except Exception as e:
+        _log.error(f" get_many_by_refs failed: {e}")
+        return []
 
 
 # === Utility ===
@@ -999,6 +1102,7 @@ __all__ = [
     "append_to_anchor_chain",
     # References
     "get_by_ref",
+    "get_many_by_refs",
     "format_ref",
     # Documentation
     "get_info",
