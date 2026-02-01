@@ -11,7 +11,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 from cathedral import Config
 
 
-SUPPORTED_BACKENDS = ("openrouter", "claude_cli", "codex_cli")
+SUPPORTED_BACKENDS = ("openrouter", "concentrate", "claude_cli", "codex_cli")
 _provider_cache: Dict[str, Any] = {}
 _last_backend: Optional[str] = None
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+from functools import partial
 from typing import AsyncGenerator
 
 from rich.text import Text
@@ -82,6 +84,7 @@ async def process_input_stream(
     thread_uid: str,
     services: ServiceRegistry | None = None,
     enable_tools: bool = False,
+    enabled_gates: list[str] | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Process input and stream response tokens.
@@ -91,6 +94,8 @@ async def process_input_stream(
         thread_uid: Thread identifier
         services: Service registry for events
         enable_tools: Enable tool calling (ToolGate orchestration)
+        enabled_gates: List of gate names to enable (e.g., ["MemoryGate", "ShellGate"])
+                       If None and enable_tools=True, all gates are enabled
 
     Yields:
         Response tokens
@@ -173,38 +178,35 @@ async def process_input_stream(
     await loom.append_async("user", user_input, thread_uid=thread_uid)
 
     # Gather evidence layer content
-    memory_context = build_memory_context(user_input, limit=3, min_confidence=0.5)
+    # Run sync memory search in executor to avoid greenlet errors
+    loop = asyncio.get_running_loop()
+    memory_context = await loop.run_in_executor(
+        None,
+        partial(build_memory_context, user_input, limit=3, min_confidence=0.5)
+    )
     scripture_context = await ScriptureGate.build_context(user_input, limit=2, min_similarity=0.4)
 
-    # === ASSEMBLE IN SPEC ORDER ===
+    # === ASSEMBLE IN CHRONOLOGICAL ORDER ===
+    # LLMs expect: system prompts -> conversation history -> current message
     messages = []
 
     # Position 0: Tool Protocol Kernel (if enabled)
     if enable_tools:
         ToolGate.initialize()
         tool_prompt = ToolGate.build_tool_prompt(
-            enabled_policies={PolicyClass.READ_ONLY}
+            enabled_policies={PolicyClass.READ_ONLY, PolicyClass.WRITE, PolicyClass.NETWORK, PolicyClass.PRIVILEGED, PolicyClass.DESTRUCTIVE},
+            gate_filter=enabled_gates,
         )
         if tool_prompt:
-            await _emit(services, "tool", "Tool calling enabled")
+            gates_msg = f" ({', '.join(enabled_gates)})" if enabled_gates else " (all gates)"
+            await _emit(services, "tool", f"Tool calling enabled{gates_msg}")
             messages.append({"role": "system", "content": tool_prompt})
 
     # Position 1: Personality / Guidance
     system_prompt = personality.get_system_prompt()
     messages.append({"role": "system", "content": system_prompt})
 
-    # Position 2: Current User Message (NON-NEGOTIABLE)
-    messages.append({"role": "user", "content": user_input})
-
-    # Position 3: Memory Context (labeled)
-    if memory_context:
-        await _emit(services, "memory", "Injecting relevant memories")
-        messages.append({
-            "role": "system",
-            "content": f"[Memory Context]\n{memory_context}"
-        })
-
-    # Position 4: Scripture / RAG Context (labeled)
+    # Position 2: Scripture / RAG Context (labeled, lower priority background docs)
     if scripture_context:
         await _emit(services, "system", "RAG context loaded")
         messages.append({
@@ -212,8 +214,19 @@ async def process_input_stream(
             "content": f"[Relevant Documents]\n{scripture_context}"
         })
 
-    # Position 5+: Prior History (continuity layer)
+    # Position 3: Memory Context (labeled, higher priority than RAG)
+    if memory_context:
+        await _emit(services, "memory", "Injecting relevant memories")
+        messages.append({
+            "role": "system",
+            "content": f"[Memory Context]\n{memory_context}"
+        })
+
+    # Position 4+: Prior History (conversation continuity - chronological)
     messages.extend(prior_history)
+
+    # Position LAST: Current User Message (what we're responding to)
+    messages.append({"role": "user", "content": user_input})
 
     full_history = messages
 
@@ -236,11 +249,13 @@ async def process_input_stream(
                 await _emit(services, event_type, message, **kwargs)
 
             orchestrator = ToolGate.get_orchestrator(
-                enabled_policies=[PolicyClass.READ_ONLY],
+                enabled_policies=[PolicyClass.READ_ONLY, PolicyClass.WRITE, PolicyClass.NETWORK, PolicyClass.PRIVILEGED, PolicyClass.DESTRUCTIVE],
                 emit_event=emit_wrapper,
+                gate_filter=enabled_gates,
             )
 
             # Run tool loop and yield tokens
+            tool_output = ""
             async for token in orchestrator.execute_loop(
                 initial_response=full_response,
                 messages=full_history,
@@ -248,7 +263,8 @@ async def process_input_stream(
                 temperature=temperature,
             ):
                 yield token
-                full_response = token  # Track final response for storage
+                tool_output += token  # Accumulate for storage
+            full_response = tool_output if tool_output else full_response
 
         else:
             # No tool calls, yield the response

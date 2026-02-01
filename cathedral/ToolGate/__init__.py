@@ -220,6 +220,7 @@ def get_orchestrator(
     max_iterations: int = 6,
     max_calls_per_step: int = 5,
     emit_event: Optional[Callable] = None,
+    gate_filter: Optional[List[str]] = None,
 ) -> ToolOrchestrator:
     """
     Get a configured tool orchestrator.
@@ -229,6 +230,7 @@ def get_orchestrator(
         max_iterations: Max loop iterations
         max_calls_per_step: Max calls per step
         emit_event: Event callback
+        gate_filter: Optional list of gate names to enable (e.g., ["MemoryGate", "ShellGate"])
 
     Returns:
         Configured ToolOrchestrator
@@ -239,6 +241,7 @@ def get_orchestrator(
         max_iterations=max_iterations,
         max_calls_per_step=max_calls_per_step,
         emit_event=emit_event,
+        gate_filter=gate_filter,
     )
 
 

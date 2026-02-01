@@ -17,7 +17,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 from sqlalchemy import select, update, delete, func, text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from .db import (
     init_conversation_db,
@@ -45,6 +45,11 @@ from .embeddings import (
 _summarizer = None
 _summarizer_checked = False
 SUMMARIZER_AVAILABLE = False
+
+
+def _format_embedding(embedding: List[float]) -> str:
+    """Format embedding list as pgvector-compatible string."""
+    return "[" + ",".join(str(x) for x in embedding) + "]"
 
 
 def _get_summarizer():
@@ -347,6 +352,7 @@ class ConversationService:
         async with get_async_session() as session:
             result = await session.execute(
                 select(ConversationMessage)
+                .options(selectinload(ConversationMessage.embedding))
                 .where(ConversationMessage.thread_uid == thread_uid)
                 .order_by(ConversationMessage.timestamp.asc())
             )
@@ -513,32 +519,32 @@ class ConversationService:
 
         async with get_async_session() as session:
             # Use raw SQL for pgvector operations
+            # Embed vector directly in SQL since asyncpg CAST doesn't work well with vector type
+            embedding_str = _format_embedding(query_embedding)
             if thread_uid and not include_all_threads:
-                sql = text("""
+                sql = text(f"""
                     SELECT m.message_uid, m.role, m.content, m.timestamp, m.thread_uid,
-                           1 - (e.embedding <=> :query_embedding::vector) as similarity
+                           1 - (e.embedding <=> '{embedding_str}'::vector) as similarity
                     FROM mg_conversation_messages m
                     JOIN mg_conversation_embeddings e ON m.message_uid = e.message_uid
                     WHERE m.thread_uid = :thread_uid
-                    ORDER BY e.embedding <=> :query_embedding::vector
+                    ORDER BY e.embedding <=> '{embedding_str}'::vector
                     LIMIT :limit
                 """)
                 result = await session.execute(sql, {
-                    "query_embedding": str(query_embedding),
                     "thread_uid": thread_uid,
                     "limit": limit
                 })
             else:
-                sql = text("""
+                sql = text(f"""
                     SELECT m.message_uid, m.role, m.content, m.timestamp, m.thread_uid,
-                           1 - (e.embedding <=> :query_embedding::vector) as similarity
+                           1 - (e.embedding <=> '{embedding_str}'::vector) as similarity
                     FROM mg_conversation_messages m
                     JOIN mg_conversation_embeddings e ON m.message_uid = e.message_uid
-                    ORDER BY e.embedding <=> :query_embedding::vector
+                    ORDER BY e.embedding <=> '{embedding_str}'::vector
                     LIMIT :limit
                 """)
                 result = await session.execute(sql, {
-                    "query_embedding": str(query_embedding),
                     "limit": limit
                 })
 
@@ -565,16 +571,16 @@ class ConversationService:
             return []
 
         async with get_async_session() as session:
-            sql = text("""
+            embedding_str = _format_embedding(query_embedding)
+            sql = text(f"""
                 SELECT id, thread_uid, summary_text, created_at,
-                       1 - (embedding <=> :query_embedding::vector) as similarity
+                       1 - (embedding <=> '{embedding_str}'::vector) as similarity
                 FROM mg_conversation_summaries
                 WHERE embedding IS NOT NULL
-                ORDER BY embedding <=> :query_embedding::vector
+                ORDER BY embedding <=> '{embedding_str}'::vector
                 LIMIT :limit
             """)
             result = await session.execute(sql, {
-                "query_embedding": str(query_embedding),
                 "limit": limit
             })
 
@@ -639,9 +645,11 @@ class ConversationService:
             # Hybrid query using RRF scoring
             # RRF formula: score = Σ (weight / (k + rank))
             # k=60 is the standard smoothing constant
+            # Embed vector directly in SQL since asyncpg CAST doesn't work well with vector type
+            embedding_str = _format_embedding(query_embedding)
 
             if thread_uid and not include_all_threads:
-                sql = text("""
+                sql = text(f"""
                     WITH fts_results AS (
                         SELECT message_uid,
                                ROW_NUMBER() OVER (ORDER BY ts_rank(search_vector, plainto_tsquery('english', :query)) DESC) as fts_rank
@@ -652,7 +660,7 @@ class ConversationService:
                     ),
                     semantic_results AS (
                         SELECT m.message_uid,
-                               ROW_NUMBER() OVER (ORDER BY e.embedding <=> :query_embedding::vector) as sem_rank
+                               ROW_NUMBER() OVER (ORDER BY e.embedding <=> '{embedding_str}'::vector) as sem_rank
                         FROM mg_conversation_messages m
                         JOIN mg_conversation_embeddings e ON m.message_uid = e.message_uid
                         WHERE m.thread_uid = :thread_uid
@@ -674,7 +682,6 @@ class ConversationService:
                 """)
                 result = await session.execute(sql, {
                     "query": query,
-                    "query_embedding": str(query_embedding),
                     "thread_uid": thread_uid,
                     "fts_weight": fts_weight,
                     "sem_weight": semantic_weight,
@@ -682,7 +689,7 @@ class ConversationService:
                     "limit": limit
                 })
             else:
-                sql = text("""
+                sql = text(f"""
                     WITH fts_results AS (
                         SELECT message_uid,
                                ROW_NUMBER() OVER (ORDER BY ts_rank(search_vector, plainto_tsquery('english', :query)) DESC) as fts_rank
@@ -692,7 +699,7 @@ class ConversationService:
                     ),
                     semantic_results AS (
                         SELECT m.message_uid,
-                               ROW_NUMBER() OVER (ORDER BY e.embedding <=> :query_embedding::vector) as sem_rank
+                               ROW_NUMBER() OVER (ORDER BY e.embedding <=> '{embedding_str}'::vector) as sem_rank
                         FROM mg_conversation_messages m
                         JOIN mg_conversation_embeddings e ON m.message_uid = e.message_uid
                         LIMIT :search_limit
@@ -713,7 +720,6 @@ class ConversationService:
                 """)
                 result = await session.execute(sql, {
                     "query": query,
-                    "query_embedding": str(query_embedding),
                     "fts_weight": fts_weight,
                     "sem_weight": semantic_weight,
                     "search_limit": limit * 3,

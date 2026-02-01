@@ -14,6 +14,7 @@ class UserInput(BaseModel):
     user_input: str
     thread_uid: str
     enable_tools: bool = False  # Enable ToolGate tool calling
+    enabled_gates: list[str] = []  # List of enabled gates (e.g., ["MemoryGate", "ShellGate"])
 
 
 class ThreadRequest(BaseModel):
@@ -68,6 +69,7 @@ def create_router(templates, process_input_stream, loom, services) -> APIRouter:
                     user_input.thread_uid,
                     services=services,
                     enable_tools=user_input.enable_tools,
+                    enabled_gates=user_input.enabled_gates if user_input.enabled_gates else None,
                 ):
                     yield {"data": json.dumps({"token": token})}
                 yield {"data": json.dumps({"done": True})}

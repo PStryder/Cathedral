@@ -7,7 +7,16 @@ const state = {
     consoleCollapsed: false,
     consoleLineCount: 0,
     maxConsoleLines: 200,
-    toolsEnabled: false
+    toolsEnabled: false,
+    // Per-gate enablement
+    enabledGates: {
+        MemoryGate: false,
+        ScriptureGate: false,
+        FileSystemGate: false,
+        ShellGate: false,
+        BrowserGate: false,
+        SubAgentGate: false
+    }
 };
 
 // Event source and connection state
@@ -35,9 +44,13 @@ const elements = {
     // Status indicators
     connectionStatus: document.getElementById('connectionStatus'),
     connectionText: document.getElementById('connectionText'),
-    // Tools
-    toolsToggle: document.getElementById('toolsToggle'),
-    toolsLabel: document.getElementById('toolsLabel')
+    // Gate toggles
+    gateMemory: document.getElementById('gateMemory'),
+    gateScripture: document.getElementById('gateScripture'),
+    gateFilesystem: document.getElementById('gateFilesystem'),
+    gateShell: document.getElementById('gateShell'),
+    gateBrowser: document.getElementById('gateBrowser'),
+    gateSubAgent: document.getElementById('gateSubAgent')
 };
 
 // ========== Thread Management ==========
@@ -301,19 +314,26 @@ async function sendMessage() {
 
     try {
         // Use fetch with POST for SSE (EventSource only supports GET)
+        // Build list of enabled gates
+        const enabledGates = Object.entries(state.enabledGates)
+            .filter(([_, enabled]) => enabled)
+            .map(([gate, _]) => gate);
+        const anyToolsEnabled = enabledGates.length > 0;
+
         const response = await fetch('/api/chat/stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 user_input: text,
                 thread_uid: state.currentThreadUid,
-                enable_tools: state.toolsEnabled
+                enable_tools: anyToolsEnabled,
+                enabled_gates: enabledGates
             })
         });
 
-        // Log if tools enabled
-        if (state.toolsEnabled) {
-            Console.tool('Tool calling enabled for this request');
+        // Log enabled gates
+        if (anyToolsEnabled) {
+            Console.tool(`Tools enabled: ${enabledGates.join(', ')}`);
         }
 
         if (!response.ok) {
@@ -584,17 +604,38 @@ elements.sendBtn.addEventListener('click', sendMessage);
 elements.messageInput.addEventListener('keydown', handleKeyDown);
 elements.messageInput.addEventListener('input', autoResizeTextarea);
 
-// Tools toggle
-if (elements.toolsToggle) {
-    elements.toolsToggle.addEventListener('change', (e) => {
-        state.toolsEnabled = e.target.checked;
-        if (elements.toolsLabel) {
-            elements.toolsLabel.textContent = state.toolsEnabled ? 'Tools ON' : 'Tools';
-            elements.toolsLabel.className = state.toolsEnabled ? 'text-emerald-400 font-medium' : '';
-        }
-        Console.tool(state.toolsEnabled ? 'Tool calling enabled' : 'Tool calling disabled');
-    });
-}
+// Gate toggles
+const gateElements = [
+    elements.gateMemory,
+    elements.gateScripture,
+    elements.gateFilesystem,
+    elements.gateShell,
+    elements.gateBrowser,
+    elements.gateSubAgent
+];
+
+gateElements.forEach(el => {
+    if (el) {
+        el.addEventListener('change', (e) => {
+            const gate = e.target.dataset.gate;
+            state.enabledGates[gate] = e.target.checked;
+
+            // Update label style
+            const label = e.target.closest('label').querySelector('.gate-label');
+            if (label) {
+                label.className = e.target.checked
+                    ? 'gate-label font-medium'
+                    : 'gate-label';
+            }
+
+            // Count enabled gates
+            const enabledCount = Object.values(state.enabledGates).filter(v => v).length;
+            Console.tool(e.target.checked
+                ? `${gate} enabled (${enabledCount} gates active)`
+                : `${gate} disabled (${enabledCount} gates active)`);
+        });
+    }
+});
 
 // ========== Initialize ==========
 

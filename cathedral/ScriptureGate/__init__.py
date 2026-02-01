@@ -67,8 +67,51 @@ def _ensure_tables():
     if not db_initialized():
         raise RuntimeError("Database not initialized. Call init_db(...) before using ScriptureGate.")
 
-    Base.metadata.create_all(bind=get_engine())
+    engine = get_engine()
+
+    # Create pgvector extension if using PostgreSQL
+    if engine.dialect.name == "postgresql":
+        with engine.connect() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            conn.commit()
+
+    Base.metadata.create_all(bind=engine)
+
+    # Migrate embedding column from text to vector if needed (PostgreSQL only)
+    if engine.dialect.name == "postgresql":
+        _migrate_embedding_column(engine)
+
     _tables_created = True
+
+
+def _migrate_embedding_column(engine):
+    """Migrate embedding column from text to vector type if needed."""
+    with engine.connect() as conn:
+        # Check current column type
+        result = conn.execute(text("""
+            SELECT data_type FROM information_schema.columns
+            WHERE table_name = 'scripture_index' AND column_name = 'embedding'
+        """))
+        row = result.fetchone()
+        if row is None:
+            return  # Column doesn't exist, will be created fresh
+
+        current_type = row[0].lower()
+        if current_type == "user-defined":
+            # Already vector type
+            return
+
+        if current_type == "text":
+            _log.info("Migrating scripture_index.embedding from text to vector type...")
+            try:
+                # Drop the text column and recreate as vector
+                conn.execute(text("ALTER TABLE scripture_index DROP COLUMN embedding"))
+                conn.execute(text(f"ALTER TABLE scripture_index ADD COLUMN embedding vector({EMBEDDING_DIM})"))
+                conn.commit()
+                _log.info("Successfully migrated embedding column to vector type")
+            except Exception as e:
+                _log.error(f"Failed to migrate embedding column: {e}")
+                conn.rollback()
 
 
 def init_scripture_db() -> None:
@@ -286,10 +329,11 @@ async def _index_scripture(scripture_uid: str) -> bool:
     """Index a scripture (extract text, generate embedding)."""
     _ensure_tables()
 
-    with get_session() as session:
-        scripture = session.execute(
+    async with get_async_session() as session:
+        result = await session.execute(
             select(Scripture).where(Scripture.scripture_uid == scripture_uid)
-        ).scalar_one_or_none()
+        )
+        scripture = result.scalar_one_or_none()
 
         if not scripture:
             return False
@@ -320,7 +364,7 @@ async def _index_scripture(scripture_uid: str) -> bool:
                 scripture.is_indexed = True
                 scripture.indexed_at = datetime.utcnow()
 
-        session.commit()
+        await session.commit()
         return scripture.is_indexed
 
 
@@ -333,13 +377,14 @@ async def backfill_index(batch_size: int = 20) -> int:
     """Index scriptures that haven't been indexed yet."""
     _ensure_tables()
 
-    with get_session() as session:
-        unindexed = session.execute(
+    async with get_async_session() as session:
+        result = await session.execute(
             select(Scripture.scripture_uid)
             .where(Scripture.is_indexed.is_(False))
             .where(Scripture.is_deleted.is_(False))
             .limit(batch_size)
-        ).scalars().all()
+        )
+        unindexed = result.scalars().all()
 
     count = 0
     for uid in unindexed:
@@ -382,7 +427,10 @@ async def search(
     async with get_async_session() as session:
         # Build query with filters
         filters = ["is_deleted = false", "is_indexed = true"]
-        params = {"query_embedding": str(query_embedding), "limit": limit}
+        # Format embedding as pgvector-compatible string (no spaces after commas)
+        # Embed directly in SQL since asyncpg CAST doesn't work well with vector type
+        embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
+        params = {"limit": limit}
 
         if file_type:
             filters.append("file_type = :file_type")
@@ -392,11 +440,11 @@ async def search(
 
         sql = text(f"""
             SELECT scripture_uid, file_path, file_type, title, description, tags,
-                   1 - (embedding <=> :query_embedding::vector) as similarity
+                   1 - (embedding <=> '{embedding_str}'::vector) as similarity
             FROM scripture_index
             WHERE {filter_clause}
               AND embedding IS NOT NULL
-            ORDER BY embedding <=> :query_embedding::vector
+            ORDER BY embedding <=> '{embedding_str}'::vector
             LIMIT :limit
         """)
 

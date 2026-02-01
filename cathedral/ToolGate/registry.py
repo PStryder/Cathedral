@@ -330,13 +330,25 @@ BROWSERGATE_TOOLS: List[Dict[str, Any]] = [
 SUBAGENTGATE_TOOLS: List[Dict[str, Any]] = [
     {
         "method": "spawn",
-        "description": "Spawn a sub-agent to handle a task",
+        "description": "Spawn a sub-agent to handle a task. Use agent_type='claude_code' for autonomous coding agents with file/tool access.",
         "policy": PolicyClass.WRITE,
         "is_async": False,
         "args": {
-            "task": ArgSchema(type="string", description="Task instructions", required=True),
-            "context": ArgSchema(type="object", description="Context dict", required=False),
-            "personality": ArgSchema(type="string", description="Personality ID", required=False),
+            "task": ArgSchema(type="string", description="Task instructions for the agent", required=True),
+            "context": ArgSchema(type="object", description="Context dict to pass to agent", required=False),
+            "agent_type": ArgSchema(
+                type="string",
+                description="Agent backend: 'llm' (simple completion), 'claude_code' (autonomous with file/tool access), 'codex'",
+                required=False,
+                default="llm",
+                enum=["llm", "claude_code", "codex"],
+            ),
+            "working_dir": ArgSchema(
+                type="string",
+                description="Working directory for CLI agents (claude_code/codex). Defaults to project root.",
+                required=False,
+            ),
+            "personality": ArgSchema(type="string", description="Personality ID (for llm type only)", required=False),
         },
     },
     {
@@ -446,9 +458,21 @@ class ToolRegistry:
         cls,
         policy_filter: Optional[Set[PolicyClass]] = None,
         gate_filter: Optional[str] = None,
+        gates_filter: Optional[List[str]] = None,
         include_external: bool = True,
     ) -> List[ToolDefinition]:
-        """List tools, optionally filtered."""
+        """
+        List tools, optionally filtered.
+
+        Args:
+            policy_filter: Filter by policy classes
+            gate_filter: Filter by single gate name (deprecated, use gates_filter)
+            gates_filter: Filter by list of gate names
+            include_external: Include external (MCP) tools
+
+        Returns:
+            List of tool definitions
+        """
         cls.initialize()
 
         # Combine built-in and external tools
@@ -459,8 +483,13 @@ class ToolRegistry:
         if policy_filter:
             tools = [t for t in tools if t.policy_class in policy_filter]
 
+        # Single gate filter (legacy)
         if gate_filter:
             tools = [t for t in tools if t.gate == gate_filter]
+
+        # Multi-gate filter
+        if gates_filter:
+            tools = [t for t in tools if t.gate in gates_filter]
 
         return tools
 
@@ -470,9 +499,22 @@ class ToolRegistry:
         return [t.name for t in cls.list_tools(policy_filter)]
 
     @classmethod
-    def get_tools_for_prompt(cls, enabled_policies: Set[PolicyClass]) -> str:
-        """Generate tool documentation for system prompt."""
-        tools = cls.list_tools(enabled_policies)
+    def get_tools_for_prompt(
+        cls,
+        enabled_policies: Set[PolicyClass],
+        gates_filter: Optional[List[str]] = None,
+    ) -> str:
+        """
+        Generate tool documentation for system prompt.
+
+        Args:
+            enabled_policies: Set of enabled policy classes
+            gates_filter: Optional list of gate names to include
+
+        Returns:
+            Formatted tool documentation for system prompt
+        """
+        tools = cls.list_tools(enabled_policies, gates_filter=gates_filter)
 
         if not tools:
             return ""

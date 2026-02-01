@@ -101,6 +101,9 @@
         /* Console panel */
         .console-panel {
             transition: height 0.2s ease;
+            flex-shrink: 0;
+            overflow: hidden;
+            max-width: 100%;
         }
 
         .console-panel.collapsed {
@@ -109,6 +112,11 @@
 
         .console-line {
             animation: consoleFade 0.15s ease-out;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            word-break: break-word;
+            white-space: pre-wrap;
+            max-width: 100%;
         }
 
         @keyframes consoleFade {
@@ -241,15 +249,45 @@
                     <div class="flex justify-between items-center mt-2 text-xs text-cathedral-muted">
                         <div class="flex items-center gap-4">
                             <span>Commands: /search, /remember, /lock, /spawn</span>
-                            <!-- Tools Toggle -->
-                            <label class="flex items-center gap-2 cursor-pointer select-none">
-                                <input type="checkbox" id="toolsToggle"
-                                       class="w-4 h-4 rounded border-gray-600 bg-gray-700 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-0">
-                                <span class="flex items-center gap-1">
-                                    <span class="text-emerald-400">&#128295;</span>
-                                    <span id="toolsLabel">Tools</span>
-                                </span>
-                            </label>
+                            <!-- Gate Toggles -->
+                            <div class="flex items-center gap-3">
+                                <label class="flex items-center gap-1.5 cursor-pointer select-none" title="Memory (search, recall, store)">
+                                    <input type="checkbox" id="gateMemory" data-gate="MemoryGate"
+                                           class="w-3.5 h-3.5 rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-0">
+                                    <span class="text-blue-400">&#128065;</span>
+                                    <span class="gate-label">Memory</span>
+                                </label>
+                                <label class="flex items-center gap-1.5 cursor-pointer select-none" title="Scripture RAG (search documents)">
+                                    <input type="checkbox" id="gateScripture" data-gate="ScriptureGate"
+                                           class="w-3.5 h-3.5 rounded border-gray-600 bg-gray-700 text-purple-500 focus:ring-purple-500 focus:ring-offset-0">
+                                    <span class="text-purple-400">&#128220;</span>
+                                    <span class="gate-label">Scripture</span>
+                                </label>
+                                <label class="flex items-center gap-1.5 cursor-pointer select-none" title="File system access">
+                                    <input type="checkbox" id="gateFilesystem" data-gate="FileSystemGate"
+                                           class="w-3.5 h-3.5 rounded border-gray-600 bg-gray-700 text-yellow-500 focus:ring-yellow-500 focus:ring-offset-0">
+                                    <span class="text-yellow-400">&#128193;</span>
+                                    <span class="gate-label">Files</span>
+                                </label>
+                                <label class="flex items-center gap-1.5 cursor-pointer select-none" title="Shell command execution">
+                                    <input type="checkbox" id="gateShell" data-gate="ShellGate"
+                                           class="w-3.5 h-3.5 rounded border-gray-600 bg-gray-700 text-red-500 focus:ring-red-500 focus:ring-offset-0">
+                                    <span class="text-red-400">&#128187;</span>
+                                    <span class="gate-label">Shell</span>
+                                </label>
+                                <label class="flex items-center gap-1.5 cursor-pointer select-none" title="Web browser (search, fetch)">
+                                    <input type="checkbox" id="gateBrowser" data-gate="BrowserGate"
+                                           class="w-3.5 h-3.5 rounded border-gray-600 bg-gray-700 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-0">
+                                    <span class="text-cyan-400">&#127760;</span>
+                                    <span class="gate-label">Browser</span>
+                                </label>
+                                <label class="flex items-center gap-1.5 cursor-pointer select-none" title="Sub-agents (spawn, manage)">
+                                    <input type="checkbox" id="gateSubAgent" data-gate="SubAgentGate"
+                                           class="w-3.5 h-3.5 rounded border-gray-600 bg-gray-700 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-0">
+                                    <span class="text-emerald-400">&#129302;</span>
+                                    <span class="gate-label">Agents</span>
+                                </label>
+                            </div>
                         </div>
                         <span id="streamingStatus" class="hidden">
                             <span class="inline-flex gap-1">
@@ -280,7 +318,7 @@
                     </div>
                 </div>
                 <!-- Console Output -->
-                <div id="consoleOutput" class="h-full overflow-y-auto p-2 mono text-xs leading-relaxed"
+                <div id="consoleOutput" class="h-full overflow-y-auto overflow-x-hidden p-2 mono text-xs leading-relaxed"
                      style="height: calc(100% - 28px);">
                     <!-- Console lines appear here -->
                 </div>

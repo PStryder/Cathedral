@@ -10,6 +10,7 @@ import sys
 import json
 import time
 import uuid
+import shutil
 import subprocess
 from pathlib import Path
 from datetime import datetime
@@ -27,11 +28,19 @@ class AgentStatus(Enum):
     CANCELLED = "cancelled"
 
 
+class AgentType(Enum):
+    """Type of sub-agent execution backend."""
+    LLM = "llm"              # Simple LLM completion via StarMirror
+    CLAUDE_CODE = "claude_code"  # Claude Code CLI (agentic with file/tool access)
+    CODEX = "codex"          # Codex CLI (agentic)
+
+
 @dataclass
 class SubAgent:
     """Represents a spawned sub-agent task."""
     id: str
     task: str
+    agent_type: AgentType = AgentType.LLM
     status: AgentStatus = AgentStatus.PENDING
     result: Optional[str] = None
     error: Optional[str] = None
@@ -39,6 +48,7 @@ class SubAgent:
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
     context: Dict[str, Any] = field(default_factory=dict)
+    working_dir: Optional[str] = None  # For CLI agents
     pid: Optional[int] = None
 
     # Runtime state (not serialized)
@@ -49,12 +59,14 @@ class SubAgent:
         return {
             "id": self.id,
             "task": self.task[:100] + "..." if len(self.task) > 100 else self.task,
+            "agent_type": self.agent_type.value,
             "status": self.status.value,
             "result": self.result[:200] + "..." if self.result and len(self.result) > 200 else self.result,
             "error": self.error,
             "created_at": self.created_at,
             "started_at": self.started_at,
             "completed_at": self.completed_at,
+            "working_dir": self.working_dir,
             "pid": self.pid,
         }
 
@@ -67,8 +79,9 @@ class SubAgent:
             AgentStatus.FAILED: "[!]",
             AgentStatus.CANCELLED: "[x]",
         }.get(self.status, "[?]")
+        type_badge = f"[{self.agent_type.value}]" if self.agent_type != AgentType.LLM else ""
         task_short = self.task[:50] + "..." if len(self.task) > 50 else self.task
-        return f"{status_icon} {self.id[:8]} | {task_short}"
+        return f"{status_icon} {self.id[:8]} {type_badge} | {task_short}"
 
 
 # Storage directory for agent results
@@ -183,6 +196,7 @@ class SubAgentManager:
     def __init__(self):
         self.agents: Dict[str, SubAgent] = {}
         self._worker_script = Path(__file__).parent / "worker.py"
+        self._cli_worker_script = Path(__file__).parent / "cli_worker.py"
         self._reconstruct_from_files()
 
     def _reconstruct_from_files(self) -> None:
@@ -205,10 +219,19 @@ class SubAgentManager:
             # Check if result exists
             result_data = _load_agent_result(agent_id, retries=1)
 
+            # Parse agent type
+            agent_type_str = task_data.get("agent_type", "llm")
+            try:
+                agent_type = AgentType(agent_type_str)
+            except ValueError:
+                agent_type = AgentType.LLM
+
             agent = SubAgent(
                 id=agent_id,
                 task=task_data.get("task", ""),
+                agent_type=agent_type,
                 context=task_data.get("context", {}),
+                working_dir=task_data.get("working_dir"),
                 created_at=task_data.get("created_at", datetime.utcnow().isoformat()),
                 started_at=task_data.get("started_at"),
                 pid=task_data.get("pid"),
@@ -242,7 +265,9 @@ class SubAgentManager:
         max_tokens: int = 2000,
         temperature: float = 0.7,
         personality: Optional[str] = None,
-        model: Optional[str] = None
+        model: Optional[str] = None,
+        agent_type: str = "llm",
+        working_dir: Optional[str] = None,
     ) -> str:
         """
         Spawn a new sub-agent to handle a task.
@@ -251,35 +276,79 @@ class SubAgentManager:
             task: The task description/instructions for the agent
             context: Optional context dict to pass to agent
             system_prompt: Optional system prompt override
-            max_tokens: Max response tokens
-            temperature: Sampling temperature
-            personality: Personality ID to use (overrides other settings)
-            model: Model override (personality takes precedence)
+            max_tokens: Max response tokens (for LLM type)
+            temperature: Sampling temperature (for LLM type)
+            personality: Personality ID to use (for LLM type)
+            model: Model override (for LLM type)
+            agent_type: "llm" (default), "claude_code", or "codex"
+            working_dir: Working directory for CLI agents (defaults to project root)
 
         Returns:
             Agent ID
         """
         agent_id = _generate_unique_id()
 
+        # Parse agent type
+        try:
+            parsed_type = AgentType(agent_type.lower())
+        except ValueError:
+            parsed_type = AgentType.LLM
+
+        # Resolve working directory for CLI agents
+        if parsed_type in (AgentType.CLAUDE_CODE, AgentType.CODEX):
+            if working_dir:
+                working_dir = str(Path(working_dir).resolve())
+            else:
+                # Default to project root
+                working_dir = str(Path(__file__).resolve().parents[2])
+
         agent = SubAgent(
             id=agent_id,
             task=task,
+            agent_type=parsed_type,
             context=context or {},
+            working_dir=working_dir,
             status=AgentStatus.PENDING
         )
 
-        # Spawn subprocess first to get PID
-        # Note: Use DEVNULL to avoid pipe deadlock. Results are written to files.
+        # Save task file first (worker reads it)
+        task_data = {
+            "id": agent_id,
+            "task": task,
+            "agent_type": parsed_type.value,
+            "context": context or {},
+            "system_prompt": system_prompt,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "personality": personality,
+            "model": model,
+            "working_dir": working_dir,
+            "created_at": agent.created_at,
+        }
+
+        task_file = _task_path(agent_id)
+        with open(task_file, "w") as f:
+            json.dump(task_data, f)
+
+        # Spawn subprocess
         try:
             env = os.environ.copy()
             env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2])
 
+            # Choose worker based on agent type
+            if parsed_type in (AgentType.CLAUDE_CODE, AgentType.CODEX):
+                worker_script = self._cli_worker_script
+                cwd = working_dir
+            else:
+                worker_script = self._worker_script
+                cwd = str(Path(__file__).resolve().parents[2])
+
             process = subprocess.Popen(
-                [sys.executable, str(self._worker_script), agent_id],
+                [sys.executable, str(worker_script), agent_id],
                 env=env,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                cwd=str(Path(__file__).resolve().parents[2])
+                cwd=cwd
             )
 
             agent.process = process
@@ -287,28 +356,15 @@ class SubAgentManager:
             agent.status = AgentStatus.RUNNING
             agent.started_at = datetime.utcnow().isoformat()
 
+            # Update task file with PID
+            task_data["pid"] = agent.pid
+            task_data["started_at"] = agent.started_at
+            with open(task_file, "w") as f:
+                json.dump(task_data, f)
+
         except Exception as e:
             agent.status = AgentStatus.FAILED
             agent.error = str(e)
-
-        # Save task file with PID for restart recovery
-        task_data = {
-            "id": agent_id,
-            "task": task,
-            "context": context or {},
-            "system_prompt": system_prompt,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "personality": personality,
-            "model": model,
-            "pid": agent.pid,
-            "created_at": agent.created_at,
-            "started_at": agent.started_at,
-        }
-
-        task_file = _task_path(agent_id)
-        with open(task_file, "w") as f:
-            json.dump(task_data, f)
 
         self.agents[agent_id] = agent
         return agent_id
@@ -480,9 +536,33 @@ def get_manager() -> SubAgentManager:
 
 
 # Convenience functions
-def spawn(task: str, **kwargs) -> str:
-    """Spawn a sub-agent. Returns agent ID."""
-    return get_manager().spawn(task, **kwargs)
+def spawn(
+    task: str,
+    context: Optional[Dict] = None,
+    agent_type: str = "llm",
+    working_dir: Optional[str] = None,
+    **kwargs
+) -> str:
+    """
+    Spawn a sub-agent. Returns agent ID.
+
+    Args:
+        task: Task instructions for the agent
+        context: Optional context dict
+        agent_type: "llm" (default), "claude_code", or "codex"
+        working_dir: Working directory for CLI agents
+        **kwargs: Additional args (system_prompt, max_tokens, temperature, personality, model)
+
+    Returns:
+        Agent ID string
+    """
+    return get_manager().spawn(
+        task,
+        context=context,
+        agent_type=agent_type,
+        working_dir=working_dir,
+        **kwargs
+    )
 
 
 def status(agent_id: str) -> Optional[dict]:
@@ -510,6 +590,51 @@ def check_completed() -> List[str]:
     return get_manager().check_completed()
 
 
+def is_claude_code_available() -> bool:
+    """Check if Claude Code CLI is available."""
+    cmd = os.getenv("CLAUDE_CLI_CMD", "claude")
+    return shutil.which(cmd) is not None
+
+
+def is_codex_available() -> bool:
+    """Check if Codex CLI is available."""
+    cmd = os.getenv("CODEX_CLI_CMD", "codex")
+    return shutil.which(cmd) is not None
+
+
+def get_available_agent_types() -> List[str]:
+    """Get list of available agent types."""
+    types = ["llm"]  # Always available
+    if is_claude_code_available():
+        types.append("claude_code")
+    if is_codex_available():
+        types.append("codex")
+    return types
+
+
+def get_health_status() -> dict:
+    """Get SubAgentGate health status."""
+    manager = get_manager()
+    running = [a for a in manager.agents.values() if a.status == AgentStatus.RUNNING]
+    completed = [a for a in manager.agents.values() if a.status == AgentStatus.COMPLETED]
+    failed = [a for a in manager.agents.values() if a.status == AgentStatus.FAILED]
+
+    return {
+        "healthy": True,
+        "agent_types": {
+            "llm": True,
+            "claude_code": is_claude_code_available(),
+            "codex": is_codex_available(),
+        },
+        "agents": {
+            "running": len(running),
+            "completed": len(completed),
+            "failed": len(failed),
+            "total": len(manager.agents),
+        },
+    }
+
+
 __all__ = [
     # Class
     "SubAgentManager",
@@ -522,7 +647,13 @@ __all__ = [
     "list_agents",
     "cancel",
     "check_completed",
+    # Health/availability
+    "is_claude_code_available",
+    "is_codex_available",
+    "get_available_agent_types",
+    "get_health_status",
     # Models
     "SubAgent",
     "AgentStatus",
+    "AgentType",
 ]

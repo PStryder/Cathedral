@@ -48,7 +48,10 @@ services:
       AUTO_MIGRATE_ON_STARTUP: "true"
       AUTO_CREATE_EXTENSIONS: "true"
 
-      # API Keys (set in .env file)
+      # LLM Provider (set in .env file)
+      LLM_BACKEND: ${LLM_BACKEND:-openrouter}
+      LLM_API_URL: ${LLM_API_URL:-https://openrouter.ai/api/v1/chat/completions}
+      LLM_API_KEY: ${LLM_API_KEY}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
 
@@ -70,9 +73,14 @@ services:
       ENABLE_SUBAGENTS: ${ENABLE_SUBAGENTS:-true}
       ENABLE_MULTIMODAL: ${ENABLE_MULTIMODAL:-true}
       AUTO_EXTRACT_MEMORY: ${AUTO_EXTRACT_MEMORY:-true}
+
+      # External MemoryGate (optional - mount path below)
+      MEMORYGATE_PATH: ${MEMORYGATE_PATH:-/app/memorygate}
     volumes:
       - cathedral_data:/app/data
       - cathedral_models:/app/models
+      # Mount external MemoryGate library (comment out if not available)
+      - ${MEMORYGATE_HOST_PATH:-f:/hexylab/lv_stack/memorygate}:/app/memorygate:ro
     ports:
       - "${APP_PORT:-8000}:8000"
     networks:

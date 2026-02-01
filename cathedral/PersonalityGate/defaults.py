@@ -4,11 +4,15 @@ Built-in personalities shipped with Cathedral.
 These are created on first run if they don't exist.
 """
 
+import os
 from datetime import datetime
 from .models import (
     Personality, LLMConfig, BehaviorConfig, MemoryConfig,
     ToolsConfig, ExampleExchange, PersonalityMetadata
 )
+
+# Use environment variable for default model, fallback to OpenRouter format
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "openai/gpt-4o-2024-11-20")
 
 
 BUILTIN_PERSONALITIES = [
@@ -17,7 +21,7 @@ BUILTIN_PERSONALITIES = [
         name="Default Assistant",
         description="Balanced, helpful, conversational assistant for general purpose use.",
         llm_config=LLMConfig(
-            model="openai/gpt-4o-2024-11-20",
+            model=DEFAULT_MODEL,
             temperature=0.7,
             max_tokens=4000,
             system_prompt="""You are a helpful, knowledgeable assistant. You provide clear, accurate, and thoughtful responses. You're conversational but focused, and you adapt your communication style to match the user's needs. When uncertain, you acknowledge it and offer to explore further."""
@@ -49,7 +53,7 @@ BUILTIN_PERSONALITIES = [
         name="Research Assistant",
         description="Academic research focus with citation emphasis and formal tone.",
         llm_config=LLMConfig(
-            model="anthropic/claude-sonnet-4",
+            model=DEFAULT_MODEL,
             temperature=0.5,
             max_tokens=6000,
             system_prompt="""You are a research assistant specializing in academic work. You maintain rigorous academic standards in all responses.
@@ -95,7 +99,7 @@ Key behaviors:
         name="Code Reviewer",
         description="Technical, precise code review with security and best practices focus.",
         llm_config=LLMConfig(
-            model="anthropic/claude-sonnet-4",
+            model=DEFAULT_MODEL,
             temperature=0.3,
             max_tokens=4000,
             system_prompt="""You are an expert code reviewer with deep knowledge of software engineering best practices, security, and design patterns.
@@ -142,7 +146,7 @@ Be thorough but constructive. The goal is better code, not criticism."""
         name="Creative Writer",
         description="Imaginative and expressive writing with narrative focus.",
         llm_config=LLMConfig(
-            model="openai/gpt-4o-2024-11-20",
+            model=DEFAULT_MODEL,
             temperature=0.9,
             max_tokens=4000,
             system_prompt="""You are a creative writing partner with a gift for vivid storytelling and evocative language.
@@ -190,7 +194,7 @@ You can write in any style from literary fiction to genre work, poetry to screen
         name="Technical Writer",
         description="Clear, structured documentation with examples-driven approach.",
         llm_config=LLMConfig(
-            model="openai/gpt-4o-2024-11-20",
+            model=DEFAULT_MODEL,
             temperature=0.4,
             max_tokens=4000,
             system_prompt="""You are a technical writer specializing in clear, accurate documentation.
@@ -237,7 +241,7 @@ Always consider: What does the reader need to accomplish? What might confuse the
         name="Debugger",
         description="Analytical, systematic problem-solving with step-by-step reasoning.",
         llm_config=LLMConfig(
-            model="anthropic/claude-sonnet-4",
+            model=DEFAULT_MODEL,
             temperature=0.3,
             max_tokens=4000,
             system_prompt="""You are a systematic debugger and problem-solver. Your approach is methodical and thorough.
@@ -286,7 +290,7 @@ Be patient. Most bugs are logical once you find them."""
         name="Tutor",
         description="Patient, explanatory teaching with Socratic method and analogies.",
         llm_config=LLMConfig(
-            model="openai/gpt-4o-2024-11-20",
+            model=DEFAULT_MODEL,
             temperature=0.6,
             max_tokens=4000,
             system_prompt="""You are a patient, skilled tutor who adapts to each learner's level and style.

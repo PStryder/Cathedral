@@ -136,6 +136,7 @@ class ToolOrchestrator:
         policy_manager: Optional[PolicyManager] = None,
         budget: Optional[ToolBudget] = None,
         emit_event: Optional[Callable] = None,
+        enabled_gates: Optional[List[str]] = None,
     ):
         """
         Initialize orchestrator.
@@ -144,10 +145,12 @@ class ToolOrchestrator:
             policy_manager: Policy manager instance (uses global if None)
             budget: Execution budget (uses defaults if None)
             emit_event: Optional async callback for events
+            enabled_gates: Optional list of gate names to enable (None = all gates)
         """
         self.policy_manager = policy_manager or get_policy_manager()
         self.budget = budget or ToolBudget()
         self.emit_event = emit_event
+        self.enabled_gates = enabled_gates  # None means all gates enabled
 
         # Initialize registry
         ToolRegistry.initialize()
@@ -174,6 +177,13 @@ class ToolOrchestrator:
         tool = ToolRegistry.get_tool(call.tool)
         if not tool:
             return ToolResult.failure(call.id, f"Unknown tool: {call.tool}")
+
+        # Check if gate is enabled
+        if self.enabled_gates is not None and tool.gate not in self.enabled_gates:
+            return ToolResult.failure(
+                call.id,
+                f"Gate {tool.gate} is not enabled. Enabled gates: {', '.join(self.enabled_gates)}"
+            )
 
         # Validate arguments
         valid, error = validate_args(tool, call.args)
@@ -338,10 +348,14 @@ class ToolOrchestrator:
             ):
                 current_response += token
 
-        # Yield any remaining text from final response
-        if current_response and not tool_calls:
-            # Already yielded above
-            pass
+        # Yield any remaining response that wasn't yielded in the loop
+        # This handles cases where:
+        # 1. Loop exited due to can_iterate() returning False
+        # 2. Final response was fetched but not yet parsed/yielded
+        if current_response:
+            remaining, final_calls = parse_tool_calls(current_response)
+            if not final_calls and remaining:
+                yield remaining
 
     def get_budget_status(self) -> Dict[str, Any]:
         """Get current budget status."""
@@ -364,6 +378,7 @@ def create_orchestrator(
     max_iterations: int = 6,
     max_calls_per_step: int = 5,
     emit_event: Optional[Callable] = None,
+    gate_filter: Optional[List[str]] = None,
 ) -> ToolOrchestrator:
     """
     Create a configured orchestrator.
@@ -373,6 +388,7 @@ def create_orchestrator(
         max_iterations: Max loop iterations
         max_calls_per_step: Max calls per step
         emit_event: Event callback
+        gate_filter: Optional list of gate names to enable
 
     Returns:
         Configured ToolOrchestrator
@@ -392,6 +408,7 @@ def create_orchestrator(
         policy_manager=policy_manager,
         budget=budget,
         emit_event=emit_event,
+        enabled_gates=gate_filter,
     )
 
 

@@ -37,8 +37,45 @@ def init_conversation_db() -> None:
     # Add FTS support for PostgreSQL only (after table creation)
     if engine.dialect.name == "postgresql":
         _add_fts_support(engine)
+        _migrate_embedding_column(engine)
 
     _tables_initialized = True
+
+
+def _migrate_embedding_column(engine) -> None:
+    """Migrate embedding columns from text to vector type if needed."""
+    from .models import EMBEDDING_DIM
+
+    # Tables that have embedding columns
+    tables_with_embeddings = [
+        "mg_conversation_embeddings",
+        "mg_conversation_summaries",
+    ]
+
+    with engine.connect() as conn:
+        for table_name in tables_with_embeddings:
+            # Check current column type
+            result = conn.execute(text(f"""
+                SELECT data_type FROM information_schema.columns
+                WHERE table_name = '{table_name}' AND column_name = 'embedding'
+            """))
+            row = result.fetchone()
+            if row is None:
+                continue  # Column doesn't exist
+
+            current_type = row[0].lower()
+            if current_type == "user-defined":
+                # Already vector type
+                continue
+
+            if current_type == "text":
+                # Drop and recreate as vector
+                try:
+                    conn.execute(text(f"ALTER TABLE {table_name} DROP COLUMN embedding"))
+                    conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN embedding vector({EMBEDDING_DIM})"))
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
 
 
 def _add_fts_support(engine) -> None:

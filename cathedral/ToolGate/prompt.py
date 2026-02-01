@@ -11,7 +11,7 @@ The tool protocol prompt is configurable but protected:
 
 from __future__ import annotations
 
-from typing import Optional, Set
+from typing import List, Optional, Set
 
 from cathedral.ToolGate.models import PolicyClass
 from cathedral.ToolGate.registry import ToolRegistry
@@ -59,6 +59,7 @@ def build_tool_prompt(
     include_schemas: bool = True,
     include_example: bool = True,
     use_custom_prompt: bool = True,
+    gate_filter: Optional[List[str]] = None,
 ) -> str:
     """
     Build the system prompt section for tool usage.
@@ -71,6 +72,7 @@ def build_tool_prompt(
         include_schemas: Whether to include full tool schemas
         include_example: Whether to include example tool call
         use_custom_prompt: Whether to use custom prompt (if configured)
+        gate_filter: Optional list of gate names to include (e.g., ["MemoryGate", "ShellGate"])
 
     Returns:
         System prompt section for tool instructions
@@ -99,14 +101,15 @@ def build_tool_prompt(
 
     if include_schemas:
         # Full schemas
-        tool_docs = ToolRegistry.get_tools_for_prompt(enabled_policies)
+        tool_docs = ToolRegistry.get_tools_for_prompt(enabled_policies, gates_filter=gate_filter)
         if tool_docs:
             sections.append(tool_docs)
         else:
             sections.append("*No tools available with current permissions.*")
     else:
-        # Just tool names
-        tool_names = ToolRegistry.list_tool_names(enabled_policies)
+        # Just tool names - filter by gates
+        tools = ToolRegistry.list_tools(enabled_policies, gates_filter=gate_filter)
+        tool_names = [t.name for t in tools]
         if tool_names:
             for name in sorted(tool_names):
                 sections.append(f"- `{name}`")
