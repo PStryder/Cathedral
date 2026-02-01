@@ -139,13 +139,16 @@
                     <div id="mounts-list" class="space-y-2 text-sm">
                         <!-- Populated by JS -->
                     </div>
-                    <div class="mt-3 pt-3 border-t border-gray-700">
+                    <div class="mt-3 pt-3 border-t border-gray-700 space-y-2">
                         <button onclick="showMountModal()" class="btn btn-secondary btn-sm w-full">
                             + Add Mount
                         </button>
+                        <button id="download-override-btn" onclick="showDownloadModal()" class="btn btn-primary btn-sm w-full hidden">
+                            ⬇️ Download Override File
+                        </button>
                     </div>
                     <div id="mount-restart-warning" class="hidden mt-3 p-2 bg-yellow-900/30 border border-yellow-700 rounded text-xs text-yellow-400">
-                        ⚠️ Pending mounts require container restart to take effect.
+                        ⚠️ Mounts require container restart. Click "Download Override File" above.
                     </div>
                 </div>
             </div>
@@ -299,9 +302,6 @@
     <div id="mount-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 hidden">
         <div class="bg-gray-900 rounded-xl p-6 w-full max-w-lg border border-gray-700">
             <h2 class="text-xl font-semibold text-purple-400 mb-4">Add Volume Mount</h2>
-            <div class="mb-4 p-3 bg-yellow-900/30 border border-yellow-700 rounded text-sm text-yellow-400">
-                ⚠️ <strong>Restart Required:</strong> New mounts only take effect after restarting the Docker container.
-            </div>
             <form onsubmit="addMount(event)" class="space-y-4">
                 <div>
                     <label class="block text-sm text-gray-400 mb-1">Host Path</label>
@@ -321,26 +321,44 @@
                     </select>
                 </div>
 
-                <!-- Generated YAML -->
-                <div id="mount-yaml-section" class="hidden">
-                    <label class="block text-sm text-gray-400 mb-1">Add to docker-compose.yml</label>
-                    <div class="relative">
-                        <pre id="mount-yaml" class="bg-gray-950 p-3 rounded text-xs text-green-400 overflow-x-auto"></pre>
-                        <button type="button" onclick="copyMountYaml()" class="absolute top-2 right-2 text-xs text-gray-400 hover:text-white">
-                            📋 Copy
-                        </button>
-                    </div>
-                    <p class="text-xs text-gray-500 mt-2">
-                        Add this line under <code class="text-purple-400">volumes:</code> in your docker-compose.yml, then run:
-                        <code class="text-purple-400 block mt-1">docker-compose down && docker-compose up -d</code>
-                    </p>
-                </div>
-
                 <div class="flex gap-3 pt-2">
-                    <button type="button" onclick="hideMountModal()" class="btn btn-secondary flex-1">Close</button>
-                    <button type="button" onclick="generateMountYaml()" class="btn btn-primary flex-1">Generate YAML</button>
+                    <button type="button" onclick="hideMountModal()" class="btn btn-secondary flex-1">Cancel</button>
+                    <button type="submit" class="btn btn-primary flex-1">Add Mount</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- Download Override Modal -->
+    <div id="download-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 hidden">
+        <div class="bg-gray-900 rounded-xl p-6 w-full max-w-2xl border border-gray-700">
+            <h2 class="text-xl font-semibold text-purple-400 mb-4">Apply Volume Mounts</h2>
+
+            <div class="mb-4 p-3 bg-blue-900/30 border border-blue-700 rounded text-sm text-blue-300">
+                <strong>How this works:</strong> Docker Compose automatically merges <code>docker-compose.override.yml</code>
+                with your main config. Download this file, place it next to your <code>docker-compose.yml</code>, and restart.
+            </div>
+
+            <div class="mb-4">
+                <label class="block text-sm text-gray-400 mb-2">Generated docker-compose.override.yml</label>
+                <pre id="override-yaml" class="bg-gray-950 p-4 rounded text-sm text-green-400 overflow-x-auto max-h-64"></pre>
+            </div>
+
+            <div class="mb-4 p-3 bg-gray-800 rounded text-sm">
+                <strong class="text-gray-300">Steps:</strong>
+                <ol class="list-decimal list-inside mt-2 space-y-1 text-gray-400">
+                    <li>Click <strong class="text-white">Download</strong> below</li>
+                    <li>Place the file in your Cathedral folder (next to docker-compose.yml)</li>
+                    <li>Run: <code class="text-purple-400">docker-compose down && docker-compose up -d</code></li>
+                    <li>Come back here and add folders using the container paths</li>
+                </ol>
+            </div>
+
+            <div class="flex gap-3">
+                <button type="button" onclick="hideDownloadModal()" class="btn btn-secondary flex-1">Close</button>
+                <button type="button" onclick="copyOverrideYaml()" class="btn btn-secondary flex-1">📋 Copy</button>
+                <button type="button" onclick="downloadOverrideYaml()" class="btn btn-primary flex-1">⬇️ Download</button>
+            </div>
         </div>
     </div>
 
@@ -808,34 +826,32 @@
         function renderMounts(mounts) {
             const container = document.getElementById('mounts-list');
             const warning = document.getElementById('mount-restart-warning');
+            const downloadBtn = document.getElementById('download-override-btn');
 
             if (mounts.length === 0) {
                 container.innerHTML = '<p class="text-gray-500 text-xs">No mounts configured. Click "Add Mount" to get started.</p>';
                 warning.classList.add('hidden');
+                downloadBtn.classList.add('hidden');
                 return;
             }
 
-            // Check if any mounts are pending (not yet applied)
-            const hasPending = mounts.some(m => m.pending);
-            warning.classList.toggle('hidden', !hasPending);
+            // Show download button and warning when there are mounts
+            downloadBtn.classList.remove('hidden');
+            warning.classList.remove('hidden');
 
             container.innerHTML = mounts.map((m, idx) => `
-                <div class="flex items-center justify-between p-2 bg-gray-900 rounded ${m.pending ? 'border border-yellow-700' : ''}">
+                <div class="flex items-center justify-between p-2 bg-gray-900 rounded">
                     <div class="flex-1 min-w-0">
                         <div class="text-xs text-gray-300 truncate" title="${escapeHtml(m.host)}">${escapeHtml(m.host)}</div>
                         <div class="text-xs text-purple-400">→ ${escapeHtml(m.container)} <span class="text-gray-500">(${m.mode})</span></div>
                     </div>
-                    <div class="flex gap-1 ml-2">
-                        ${m.pending ? '<span class="text-yellow-400 text-xs" title="Pending restart">⏳</span>' : '<span class="text-green-400 text-xs" title="Active">✓</span>'}
-                        <button onclick="removeMount(${idx})" class="text-gray-400 hover:text-red-400 text-xs" title="Remove">✕</button>
-                    </div>
+                    <button onclick="removeMount(${idx})" class="text-gray-400 hover:text-red-400 text-xs ml-2" title="Remove">✕</button>
                 </div>
             `).join('');
         }
 
         function showMountModal() {
             document.getElementById('mount-modal').classList.remove('hidden');
-            document.getElementById('mount-yaml-section').classList.add('hidden');
             document.getElementById('mount-host').value = '';
             document.getElementById('mount-container').value = '';
             document.getElementById('mount-mode').value = 'rw';
@@ -845,7 +861,8 @@
             document.getElementById('mount-modal').classList.add('hidden');
         }
 
-        function generateMountYaml() {
+        function addMount(e) {
+            e.preventDefault();
             const host = document.getElementById('mount-host').value.trim();
             const container = document.getElementById('mount-container').value.trim();
             const mode = document.getElementById('mount-mode').value;
@@ -855,33 +872,18 @@
                 return;
             }
 
-            // Generate YAML line
-            const yaml = `      - ${host}:${container}:${mode}`;
-            document.getElementById('mount-yaml').textContent = yaml;
-            document.getElementById('mount-yaml-section').classList.remove('hidden');
-
-            // Save to local storage as pending
+            // Check for duplicates
             const mounts = JSON.parse(localStorage.getItem(MOUNTS_KEY) || '[]');
             const exists = mounts.some(m => m.container === container);
-            if (!exists) {
-                mounts.push({ host, container, mode, pending: true });
-                saveMounts(mounts);
-                showToast('Mount added (pending restart)', 'success');
+            if (exists) {
+                showToast('A mount with this container path already exists', 'error');
+                return;
             }
-        }
 
-        function copyMountYaml() {
-            const yaml = document.getElementById('mount-yaml').textContent;
-            navigator.clipboard.writeText(yaml).then(() => {
-                showToast('Copied to clipboard', 'success');
-            }).catch(() => {
-                showToast('Failed to copy', 'error');
-            });
-        }
-
-        function addMount(e) {
-            e.preventDefault();
-            generateMountYaml();
+            mounts.push({ host, container, mode });
+            saveMounts(mounts);
+            hideMountModal();
+            showToast('Mount added - download override file to apply', 'success');
         }
 
         function removeMount(idx) {
@@ -891,11 +893,58 @@
             showToast('Mount removed', 'success');
         }
 
-        function markMountsActive() {
-            // Call this after restart to mark all pending as active
+        function generateOverrideYaml() {
             const mounts = JSON.parse(localStorage.getItem(MOUNTS_KEY) || '[]');
-            mounts.forEach(m => m.pending = false);
-            saveMounts(mounts);
+            if (mounts.length === 0) return '';
+
+            const volumeLines = mounts.map(m => `      - "${m.host}:${m.container}:${m.mode}"`).join('\n');
+
+            return `# Cathedral Docker Compose Override
+# Place this file next to docker-compose.yml and restart
+# Generated: ${new Date().toISOString()}
+
+services:
+  cathedral:
+    volumes:
+${volumeLines}
+`;
+        }
+
+        function showDownloadModal() {
+            const yaml = generateOverrideYaml();
+            if (!yaml) {
+                showToast('No mounts to export', 'error');
+                return;
+            }
+            document.getElementById('override-yaml').textContent = yaml;
+            document.getElementById('download-modal').classList.remove('hidden');
+        }
+
+        function hideDownloadModal() {
+            document.getElementById('download-modal').classList.add('hidden');
+        }
+
+        function copyOverrideYaml() {
+            const yaml = document.getElementById('override-yaml').textContent;
+            navigator.clipboard.writeText(yaml).then(() => {
+                showToast('Copied to clipboard', 'success');
+            }).catch(() => {
+                showToast('Failed to copy', 'error');
+            });
+        }
+
+        function downloadOverrideYaml() {
+            const yaml = generateOverrideYaml();
+            const blob = new Blob([yaml], { type: 'text/yaml' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'docker-compose.override.yml';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showToast('Downloaded docker-compose.override.yml', 'success');
         }
 
         // Initialize
