@@ -329,6 +329,11 @@ class ToolOrchestrator:
             })
 
             # Add tool results as user message
+            # NOTE: We use "user" role because most OpenAI-compatible APIs don't
+            # support a dedicated "tool" role. This pattern works but may cause
+            # issues with models that treat user messages as higher authority.
+            # If tool-loop issues occur, consider "system" role for providers
+            # that support it, or the native tool_result format for Anthropic API.
             messages.append({
                 "role": "user",
                 "content": result_content,

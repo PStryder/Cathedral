@@ -68,6 +68,18 @@ def _load_origins() -> list[str]:
         return default_origins
 
 
+def _allow_credentials(origins: list[str]) -> bool:
+    """
+    Determine if credentials should be allowed based on origins.
+
+    CORS spec forbids wildcard origins with credentials=True.
+    This combination causes Starlette to reject requests or crash.
+    """
+    if "*" in origins:
+        return False
+    return True
+
+
 app = FastAPI()
 
 # Setup templates and static files
@@ -95,10 +107,11 @@ async def shutdown_event():
 
 app.add_middleware(SecurityMiddleware, security_manager=SecurityManager)
 
+_origins = _load_origins()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_load_origins(),
-    allow_credentials=True,
+    allow_origins=_origins,
+    allow_credentials=_allow_credentials(_origins),
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -12,7 +12,29 @@ from cathedral.services import ServiceRegistry
 from cathedral.MemoryGate.auto_memory import extract_from_exchange, build_memory_context
 from cathedral.StarMirror import reflect, reflect_stream
 from cathedral import ScriptureGate, PersonalityGate, SecurityManager, ToolGate
-from cathedral.ToolGate import PolicyClass, is_tool_response
+from cathedral.ToolGate import PolicyClass, is_tool_response, get_policy_manager
+
+
+def _get_enabled_policies() -> set[PolicyClass]:
+    """
+    Get the set of policies that are actually enabled by PolicyManager.
+
+    This checks SecurityManager state to avoid advertising capabilities
+    that will be rejected at execution time (e.g., WRITE when locked).
+    """
+    pm = get_policy_manager()
+    enabled = set()
+
+    # READ_ONLY is always available
+    enabled.add(PolicyClass.READ_ONLY)
+
+    # Try to enable each policy and track successes
+    for policy in [PolicyClass.NETWORK, PolicyClass.WRITE, PolicyClass.PRIVILEGED, PolicyClass.DESTRUCTIVE]:
+        success, _ = pm.enable_policy(policy)
+        if success:
+            enabled.add(policy)
+
+    return enabled
 
 
 async def _emit(services: ServiceRegistry, event_type: str, message: str, **kwargs) -> None:
@@ -145,7 +167,7 @@ async def process_input_stream(
     personality = PersonalityGate.load(personality_id) or PersonalityGate.get_default()
 
     # ==========================================================================
-    # CATHEDRAL CONTEXT ASSEMBLY ORDER (Normative Specification v1.0)
+    # CATHEDRAL CONTEXT ASSEMBLY ORDER (Normative Specification v1.1)
     # ==========================================================================
     #
     # This ordering is load-bearing. Deviations cause subtle failures.
@@ -154,18 +176,22 @@ async def process_input_stream(
     #   0. Tool Protocol Kernel     (if tools enabled, immutable)
     #   1. Personality / Guidance   (editable)
     #
-    # INTENT LAYER (User):
-    #   2. Current User Message     (NON-NEGOTIABLE POSITION)
-    #
-    # EVIDENCE LAYER (Context):
-    #   3. Memory Context           (labeled, lower priority than user intent)
-    #   4. Scripture / RAG Context  (labeled, lowest priority)
+    # EVIDENCE LAYER (System - labeled context):
+    #   2. Scripture / RAG Context  (labeled, background documents)
+    #   3. Memory Context           (labeled, higher priority than RAG)
     #
     # CONTINUITY LAYER (History):
-    #   5+. Prior Assistant / User Turns
+    #   4+. Prior Assistant / User Turns (chronological)
+    #
+    # INTENT LAYER (User - LAST):
+    #   N. Current User Message     (NON-NEGOTIABLE FINAL POSITION)
+    #
+    # Rationale: User message last ensures the model focuses on the current
+    # request. Context injected before history provides background without
+    # overwhelming recency. Tool protocol first ensures instructions are seen.
     #
     # Prohibited:
-    #   ❌ Memory or RAG before current user message
+    #   ❌ Current user message anywhere except LAST
     #   ❌ Retrieved context ahead of tool protocol
     #   ❌ Interleaving memory inside assistant history
     # ==========================================================================
@@ -191,15 +217,19 @@ async def process_input_stream(
     messages = []
 
     # Position 0: Tool Protocol Kernel (if enabled)
+    # Determine which policies are actually enabled (not just requested)
+    active_policies = _get_enabled_policies() if enable_tools else set()
+
     if enable_tools:
         ToolGate.initialize()
         tool_prompt = ToolGate.build_tool_prompt(
-            enabled_policies={PolicyClass.READ_ONLY, PolicyClass.WRITE, PolicyClass.NETWORK, PolicyClass.PRIVILEGED, PolicyClass.DESTRUCTIVE},
+            enabled_policies=active_policies,
             gate_filter=enabled_gates,
         )
         if tool_prompt:
             gates_msg = f" ({', '.join(enabled_gates)})" if enabled_gates else " (all gates)"
-            await _emit(services, "tool", f"Tool calling enabled{gates_msg}")
+            policy_names = sorted(p.value for p in active_policies)
+            await _emit(services, "tool", f"Tool calling enabled{gates_msg}, policies: {', '.join(policy_names)}")
             messages.append({"role": "system", "content": tool_prompt})
 
     # Position 1: Personality / Guidance
@@ -249,7 +279,7 @@ async def process_input_stream(
                 await _emit(services, event_type, message, **kwargs)
 
             orchestrator = ToolGate.get_orchestrator(
-                enabled_policies=[PolicyClass.READ_ONLY, PolicyClass.WRITE, PolicyClass.NETWORK, PolicyClass.PRIVILEGED, PolicyClass.DESTRUCTIVE],
+                enabled_policies=list(active_policies),
                 emit_event=emit_wrapper,
                 gate_filter=enabled_gates,
             )

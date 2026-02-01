@@ -1,8 +1,6 @@
 # Cathedral Docker Compose
 # Complete stack with PostgreSQL + pgvector
 
-version: '3.8'
-
 services:
   # ============================================
   # PostgreSQL with pgvector

@@ -197,20 +197,29 @@ class PolicyManager:
         if not url:
             return True, None
 
-        # Block localhost/internal networks for security
-        blocked_patterns = [
-            "localhost",
-            "127.0.0.1",
-            "0.0.0.0",
-            "192.168.",
-            "10.",
-            "172.16.",
-            "::1",
-        ]
+        # Parse URL to extract hostname (not substring match on full URL)
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            hostname = parsed.hostname or ""
+            hostname_lower = hostname.lower()
+        except Exception:
+            # If we can't parse, allow (fail open for weird URLs)
+            return True, None
 
-        for pattern in blocked_patterns:
-            if pattern in url:
-                return False, f"Access to internal networks blocked: {pattern}"
+        # Block localhost/internal networks for security
+        # Check hostname only, not full URL (avoids false positives on query params)
+        blocked_hostnames = {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
+        if hostname_lower in blocked_hostnames:
+            return False, f"Access to internal networks blocked: {hostname}"
+
+        # Check private IP ranges by prefix
+        private_prefixes = ("192.168.", "10.", "172.16.", "172.17.", "172.18.",
+                           "172.19.", "172.20.", "172.21.", "172.22.", "172.23.",
+                           "172.24.", "172.25.", "172.26.", "172.27.", "172.28.",
+                           "172.29.", "172.30.", "172.31.")
+        if hostname_lower.startswith(private_prefixes):
+            return False, f"Access to internal networks blocked: {hostname}"
 
         return True, None
 
