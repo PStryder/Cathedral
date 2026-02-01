@@ -48,7 +48,7 @@ from .models import (
     HistoryEntry,
 )
 from .security import (
-    validate_command,
+    validate_command as _validate_command_impl,
     sanitize_environment,
     check_dangerous_constructs,
     estimate_command_risk,
@@ -406,7 +406,7 @@ class ShellGate:
             Tuple of (is_valid, error_message)
         """
         config = cls._get_config().command_config
-        return validate_command(command, config)
+        return _validate_command_impl(command, config)
 
     @classmethod
     def check_warnings(cls, command: str) -> List[str]:
