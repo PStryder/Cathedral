@@ -270,10 +270,11 @@ async def process_input_stream(
     temperature = personality.llm_config.temperature
 
     if enable_tools:
-        # Tool mode: collect full response, then run orchestration loop
+        # Tool mode: stream tokens while accumulating to check for tool calls
         full_response = ""
         async for token in reflect_stream(full_history, model=model, temperature=temperature):
             full_response += token
+            yield token  # Stream tokens immediately
 
         # Check if response contains tool calls
         if is_tool_response(full_response):
@@ -301,9 +302,7 @@ async def process_input_stream(
                 tool_output += token  # Accumulate for storage
             full_response = tool_output if tool_output else full_response
 
-        else:
-            # No tool calls, yield the response
-            yield full_response
+        # If no tool calls, we've already streamed the response above
 
     else:
         # Standard mode: stream directly
