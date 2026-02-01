@@ -78,8 +78,7 @@ services:
       - cathedral_data:/app/data
       - cathedral_models:/app/models
       # Mount external MemoryGate library (set MEMORYGATE_HOST_PATH in .env)
-      # Comment out if not using external MemoryGate
-      # - ${MEMORYGATE_HOST_PATH}:/app/memorygate:ro
+      - ${MEMORYGATE_HOST_PATH}:/app/memorygate:ro
     ports:
       - "${APP_PORT:-8000}:8000"
     networks:

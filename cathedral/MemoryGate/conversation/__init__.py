@@ -229,7 +229,14 @@ class ConversationService:
             if not thread:
                 return False
 
-            session.execute(update(ConversationThread).values(is_active=False))
+            # Only deactivate the currently active thread (not all threads)
+            # This prevents updating timestamps on all threads
+            session.execute(
+                update(ConversationThread)
+                .where(ConversationThread.is_active.is_(True))
+                .where(ConversationThread.thread_uid != thread_uid)
+                .values(is_active=False)
+            )
             session.execute(
                 update(ConversationThread)
                 .where(ConversationThread.thread_uid == thread_uid)

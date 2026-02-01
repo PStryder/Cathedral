@@ -208,6 +208,31 @@ class ConversationSummary(Base):
         }
 
 
+class GenericEmbedding(Base):
+    """
+    Generic embedding storage for Cathedral thread embeddings.
+
+    Note: MemoryGate creates its own 'embeddings' table via alembic migrations.
+    This table is for Cathedral-specific thread embeddings only.
+    """
+    __tablename__ = "mg_thread_embeddings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String(100), nullable=False, default="cathedral")
+    source_type = Column(String(50), nullable=False)  # thread, observation, pattern, concept
+    source_id = Column(String(100), nullable=False)
+    embedding = Column(Vector(EMBEDDING_DIM)) if PGVECTOR_AVAILABLE else Column(Text)
+    model_version = Column(String(100), default="text-embedding-3-small")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_embeddings_tenant_source", "tenant_id", "source_type"),
+        Index("ix_embeddings_lookup", "tenant_id", "source_type", "source_id"),
+        # Unique constraint for upsert
+        Index("uq_embeddings_full", "tenant_id", "source_type", "source_id", "model_version", unique=True),
+    )
+
+
 # Helper function to get all models for table creation
 def get_all_models():
     """Return list of all conversation models."""
@@ -216,4 +241,5 @@ def get_all_models():
         ConversationMessage,
         ConversationEmbedding,
         ConversationSummary,
+        GenericEmbedding,
     ]

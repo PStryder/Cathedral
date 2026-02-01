@@ -109,9 +109,32 @@ def initialize() -> bool:
 
     try:
         init_db()
+
+        # First, bootstrap without agent_uuid to register Cathedral agent
+        # This will mint a new UUID or find existing one
+        bootstrap_ctx = RequestContext(
+            auth=AuthContext(tenant_id="cathedral"),
+            agent_uuid=None  # Let bootstrap mint/find
+        )
+
+        bootstrap_result = memory_service.memory_bootstrap(
+            ai_name="Cathedral",
+            ai_platform="Cathedral",
+            context=bootstrap_ctx
+        )
+
+        # Extract the agent_uuid from bootstrap result (at root level)
+        agent_uuid = None
+        if bootstrap_result:
+            agent_uuid = bootstrap_result.get("agent_uuid")
+            if agent_uuid:
+                _log.info(f"Using agent_uuid: {agent_uuid}")
+            else:
+                _log.warning("Bootstrap did not return agent_uuid, will use context without it")
+
         _context = RequestContext(
             auth=AuthContext(tenant_id="cathedral"),
-            agent_uuid="ag_CATHEDRAL"
+            agent_uuid=agent_uuid
         )
         _initialized = True
         _log.info("Initialized successfully")
@@ -277,7 +300,8 @@ def search(
 def recall(
     domain: str = None,
     limit: int = 10,
-    min_confidence: float = 0.0
+    min_confidence: float = 0.0,
+    include_cold: bool = False
 ) -> list:
     """Recall recent observations, optionally filtered by domain."""
     ctx = get_context()
@@ -289,9 +313,11 @@ def recall(
             domain=domain,
             limit=limit,
             min_confidence=min_confidence,
+            include_cold=include_cold,
             context=ctx
         )
-        return result.get("observations", [])
+        # MemoryGate returns 'results' not 'observations'
+        return result.get("results", [])
     except Exception as e:
         _log.error(f" recall failed: {e}")
         return []
@@ -304,7 +330,7 @@ def get_stats() -> Optional[dict]:
         return None
 
     try:
-        return memory_service.memory_stats()
+        return memory_service.memory_stats(context=ctx)
     except Exception as e:
         _log.error(f" get_stats failed: {e}")
         return None
