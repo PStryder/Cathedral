@@ -53,6 +53,12 @@ class DiscoveryConfig:
     relationship_tag: str = "discovered"
     relationship_method: str = "embedding_similarity"
 
+    # Hybrid search settings
+    use_hybrid_search: bool = True
+    fts_weight: float = 0.4
+    semantic_weight: float = 0.6
+    overlap_boost: float = 1.5  # Multiplier when item appears in both FTS and semantic results
+
 
 @dataclass
 class DiscoveredRelationship:
@@ -72,6 +78,9 @@ class KnowledgeDiscoveryService:
     - Conversation tables (messages, threads, summaries)
     - MemoryGate tables (observations, patterns, concepts)
 
+    Supports hybrid search (BM25/FTS + embedding similarity) with overlap boosting
+    for cross-thread message discovery when PostgreSQL is available.
+
     Uses MemoryGate conversation tables.
     """
 
@@ -81,6 +90,7 @@ class KnowledgeDiscoveryService:
         self._running = False
         self._task: Optional[asyncio.Task] = None
         self._message_counts: Dict[str, int] = {}  # thread_uid -> message count since last thread embedding
+        self._is_postgres: Optional[bool] = None  # Cached PostgreSQL detection
 
     async def start(self):
         """Start the background discovery worker."""
@@ -105,14 +115,24 @@ class KnowledgeDiscoveryService:
         self,
         message_uid: str,
         thread_uid: str,
-        embedding: List[float]
+        embedding: List[float],
+        content: Optional[str] = None
     ):
-        """Queue a message for background discovery."""
+        """
+        Queue a message for background discovery.
+
+        Args:
+            message_uid: The message UID
+            thread_uid: The thread containing the message
+            embedding: The message's embedding vector
+            content: Optional message content (enables hybrid search without re-fetching)
+        """
         await self._queue.put({
             "type": "message",
             "message_uid": message_uid,
             "thread_uid": thread_uid,
-            "embedding": embedding
+            "embedding": embedding,
+            "content": content
         })
 
         # Track message count for thread embedding updates
@@ -148,7 +168,8 @@ class KnowledgeDiscoveryService:
                     await self._discover_for_message(
                         item["message_uid"],
                         item["thread_uid"],
-                        item["embedding"]
+                        item["embedding"],
+                        item.get("content")
                     )
                 elif item["type"] == "thread_embedding":
                     await self._update_thread_embedding(item["thread_uid"])
@@ -166,7 +187,8 @@ class KnowledgeDiscoveryService:
         self,
         message_uid: str,
         thread_uid: str,
-        embedding: List[float]
+        embedding: List[float],
+        content: Optional[str] = None
     ):
         """
         Discover relationships for a message.
@@ -175,7 +197,13 @@ class KnowledgeDiscoveryService:
         - Similar observations
         - Similar patterns
         - Related concepts
-        - Similar messages in OTHER threads
+        - Similar messages in OTHER threads (uses hybrid search when available)
+
+        Args:
+            message_uid: The message to discover relationships for
+            thread_uid: The thread containing the message
+            embedding: The message's embedding vector
+            content: Optional message content for hybrid FTS search
         """
         if not self.config.enabled:
             return
@@ -187,6 +215,22 @@ class KnowledgeDiscoveryService:
         relationships = []
 
         async with get_async_session() as session:
+            # Get message content if not provided (needed for hybrid search)
+            query_text = ""
+            if content:
+                query_text = self._extract_query_text(content)
+            elif self.config.use_hybrid_search:
+                # Fetch content from database for hybrid search
+                tables = _get_conversation_tables()
+                content_query = text(f"""
+                    SELECT content FROM {tables['messages']}
+                    WHERE message_uid = :message_uid
+                """)
+                result = await session.execute(content_query, {"message_uid": message_uid})
+                row = result.fetchone()
+                if row and row[0]:
+                    query_text = self._extract_query_text(row[0])
+
             # 1. Find similar observations
             obs_results = await self._search_memorygate_embeddings(
                 session, embedding, "observation", self.config.top_k
@@ -230,18 +274,43 @@ class KnowledgeDiscoveryService:
                     ))
 
             # 4. Find similar messages in OTHER threads
-            message_results = await self._search_conversation_messages(
-                session, embedding, thread_uid, self.config.top_k
-            )
-            for other_uid, similarity in message_results:
-                if similarity >= self.config.min_similarity:
-                    relationships.append(DiscoveredRelationship(
-                        from_ref=message_ref,
-                        to_ref=f"message:{other_uid}",
-                        rel_type="similar_to",
-                        similarity=similarity,
-                        discovered_at=datetime.utcnow()
-                    ))
+            # Use hybrid search (FTS + vector with overlap boost) when configured and available
+            if self.config.use_hybrid_search and query_text:
+                message_results = await self._search_conversation_messages_hybrid(
+                    session, embedding, query_text, thread_uid, self.config.top_k
+                )
+                discovery_method = "hybrid_rrf"
+            else:
+                message_results = await self._search_conversation_messages(
+                    session, embedding, thread_uid, self.config.top_k
+                )
+                discovery_method = "embedding_similarity"
+
+            for other_uid, score in message_results:
+                # For hybrid search, scores are RRF-based (typically 0.005-0.02 range)
+                # For vector search, scores are similarity (0-1 range)
+                # Use appropriate threshold based on method
+                if discovery_method == "hybrid_rrf":
+                    # RRF scores: higher is better, but values are small
+                    # A score > 0.005 indicates reasonable relevance
+                    if score >= 0.005:
+                        relationships.append(DiscoveredRelationship(
+                            from_ref=message_ref,
+                            to_ref=f"message:{other_uid}",
+                            rel_type="similar_to",
+                            similarity=score,
+                            discovered_at=datetime.utcnow()
+                        ))
+                else:
+                    # Vector similarity: use configured threshold
+                    if score >= self.config.min_similarity:
+                        relationships.append(DiscoveredRelationship(
+                            from_ref=message_ref,
+                            to_ref=f"message:{other_uid}",
+                            rel_type="similar_to",
+                            similarity=score,
+                            discovered_at=datetime.utcnow()
+                        ))
 
         # Store relationships in MemoryGate
         for rel in relationships:
@@ -265,7 +334,7 @@ class KnowledgeDiscoveryService:
 
         Finds:
         - Related concepts
-        - Similar messages in other threads
+        - Similar messages in other threads (uses hybrid search when available)
         """
         if not self.config.enabled:
             return
@@ -283,6 +352,24 @@ class KnowledgeDiscoveryService:
             thread_ref = f"thread:{thread_uid}"
             relationships = []
 
+            # Get representative query text from recent messages for hybrid search
+            query_text = ""
+            if self.config.use_hybrid_search:
+                tables = _get_conversation_tables()
+                # Get last few messages to build a representative query
+                recent_query = text(f"""
+                    SELECT content FROM {tables['messages']}
+                    WHERE thread_uid = :thread_uid
+                    ORDER BY timestamp DESC
+                    LIMIT 3
+                """)
+                result = await session.execute(recent_query, {"thread_uid": thread_uid})
+                rows = result.fetchall()
+                if rows:
+                    # Combine recent messages for FTS query
+                    combined = " ".join(row[0] for row in rows if row[0])
+                    query_text = self._extract_query_text(combined)
+
             # 1. Find related concepts
             concept_results = await self._search_memorygate_embeddings(
                 session, embedding, "concept", self.config.top_k
@@ -298,18 +385,38 @@ class KnowledgeDiscoveryService:
                     ))
 
             # 2. Find similar messages in OTHER threads
-            message_results = await self._search_conversation_messages(
-                session, embedding, thread_uid, self.config.top_k
-            )
-            for other_uid, similarity in message_results:
-                if similarity >= self.config.min_similarity:
-                    relationships.append(DiscoveredRelationship(
-                        from_ref=thread_ref,
-                        to_ref=f"message:{other_uid}",
-                        rel_type="similar_to",
-                        similarity=similarity,
-                        discovered_at=datetime.utcnow()
-                    ))
+            # Use hybrid search when configured and we have query text
+            if self.config.use_hybrid_search and query_text:
+                message_results = await self._search_conversation_messages_hybrid(
+                    session, embedding, query_text, thread_uid, self.config.top_k
+                )
+                discovery_method = "hybrid_rrf"
+            else:
+                message_results = await self._search_conversation_messages(
+                    session, embedding, thread_uid, self.config.top_k
+                )
+                discovery_method = "embedding_similarity"
+
+            for other_uid, score in message_results:
+                # Apply appropriate threshold based on search method
+                if discovery_method == "hybrid_rrf":
+                    if score >= 0.005:
+                        relationships.append(DiscoveredRelationship(
+                            from_ref=thread_ref,
+                            to_ref=f"message:{other_uid}",
+                            rel_type="similar_to",
+                            similarity=score,
+                            discovered_at=datetime.utcnow()
+                        ))
+                else:
+                    if score >= self.config.min_similarity:
+                        relationships.append(DiscoveredRelationship(
+                            from_ref=thread_ref,
+                            to_ref=f"message:{other_uid}",
+                            rel_type="similar_to",
+                            similarity=score,
+                            discovered_at=datetime.utcnow()
+                        ))
 
         # Store relationships
         for rel in relationships:
@@ -425,6 +532,47 @@ class KnowledgeDiscoveryService:
         """Format embedding list as pgvector-compatible string."""
         return "[" + ",".join(str(v) for v in embedding) + "]"
 
+    def _is_postgresql(self) -> bool:
+        """Check if the database backend is PostgreSQL (cached)."""
+        if self._is_postgres is None:
+            try:
+                from cathedral.shared import db_service
+                engine = db_service.get_engine()
+                self._is_postgres = engine.dialect.name == "postgresql"
+            except Exception:
+                self._is_postgres = False
+        return self._is_postgres
+
+    def _extract_query_text(self, content: str) -> str:
+        """
+        Extract searchable text from message content.
+
+        Handles various content formats and extracts meaningful text
+        for full-text search queries.
+        """
+        if not content:
+            return ""
+
+        # If content is already plain text, use it directly
+        # Truncate very long content for FTS efficiency
+        text = content.strip()
+
+        # Remove common prefixes that don't add search value
+        prefixes_to_remove = [
+            "[SYSTEM]", "[USER]", "[ASSISTANT]",
+            "[EARLIER CONVERSATION SUMMARY]", "[RELEVANT CONTEXT]"
+        ]
+        for prefix in prefixes_to_remove:
+            if text.upper().startswith(prefix.upper()):
+                text = text[len(prefix):].strip()
+
+        # Truncate for FTS (long text rarely improves search)
+        max_fts_length = 1000
+        if len(text) > max_fts_length:
+            text = text[:max_fts_length]
+
+        return text
+
     async def _search_memorygate_embeddings(
         self,
         session: AsyncSession,
@@ -489,6 +637,119 @@ class KnowledgeDiscoveryService:
 
         return [(row[0], float(row[1])) for row in result.fetchall()]
 
+    async def _search_conversation_messages_hybrid(
+        self,
+        session: AsyncSession,
+        embedding: List[float],
+        query_text: str,
+        exclude_thread_uid: str,
+        limit: int,
+        fts_weight: Optional[float] = None,
+        semantic_weight: Optional[float] = None,
+        overlap_boost: Optional[float] = None,
+    ) -> List[Tuple[str, float]]:
+        """
+        Hybrid search for conversation messages using FTS + vector similarity with RRF.
+
+        Combines PostgreSQL full-text search with pgvector semantic similarity,
+        applying overlap boost for items appearing in both result sets.
+
+        Falls back to vector-only search if:
+        - Not PostgreSQL
+        - No query text provided
+        - FTS query fails
+
+        Args:
+            session: Database session
+            embedding: Query embedding vector
+            query_text: Original query text for FTS
+            exclude_thread_uid: Thread to exclude from results
+            limit: Maximum results to return
+            fts_weight: Weight for FTS component (default from config)
+            semantic_weight: Weight for semantic component (default from config)
+            overlap_boost: Multiplier for items in both result sets (default from config)
+
+        Returns:
+            List of (message_uid, score) tuples, sorted by combined RRF score
+        """
+        # Use config defaults if not specified
+        fts_weight = fts_weight or self.config.fts_weight
+        semantic_weight = semantic_weight or self.config.semantic_weight
+        overlap_boost = overlap_boost or self.config.overlap_boost
+
+        # Fallback conditions: not PostgreSQL or no query text
+        if not self._is_postgresql() or not query_text or not query_text.strip():
+            return await self._search_conversation_messages(
+                session, embedding, exclude_thread_uid, limit
+            )
+
+        tables = _get_conversation_tables()
+        embedding_str = self._format_embedding_for_pgvector(embedding)
+
+        # Clean query text for FTS (plainto_tsquery handles most escaping)
+        clean_query = query_text.strip()
+
+        # Hybrid RRF query with overlap boost
+        # k=60 is the standard RRF smoothing constant
+        # search_limit is larger than limit to get good candidate pool for fusion
+        search_limit = limit * 3
+
+        query = text(f"""
+            WITH fts_results AS (
+                SELECT m.message_uid,
+                       ROW_NUMBER() OVER (
+                           ORDER BY ts_rank(m.search_vector, plainto_tsquery('english', :query)) DESC
+                       ) as fts_rank
+                FROM {tables['messages']} m
+                WHERE m.thread_uid != :exclude_thread_uid
+                  AND m.search_vector @@ plainto_tsquery('english', :query)
+                LIMIT :search_limit
+            ),
+            semantic_results AS (
+                SELECT m.message_uid,
+                       ROW_NUMBER() OVER (
+                           ORDER BY e.embedding <=> '{embedding_str}'::vector
+                       ) as sem_rank
+                FROM {tables['messages']} m
+                JOIN {tables['embeddings']} e ON m.message_uid = e.message_uid
+                WHERE m.thread_uid != :exclude_thread_uid
+                LIMIT :search_limit
+            ),
+            combined AS (
+                SELECT COALESCE(f.message_uid, s.message_uid) as message_uid,
+                       (COALESCE(:fts_weight / (60.0 + f.fts_rank), 0) +
+                        COALESCE(:sem_weight / (60.0 + s.sem_rank), 0)) *
+                       CASE WHEN f.message_uid IS NOT NULL AND s.message_uid IS NOT NULL
+                            THEN :overlap_boost ELSE 1.0 END as rrf_score
+                FROM fts_results f
+                FULL OUTER JOIN semantic_results s ON f.message_uid = s.message_uid
+            )
+            SELECT message_uid, rrf_score
+            FROM combined
+            ORDER BY rrf_score DESC
+            LIMIT :limit
+        """)
+
+        try:
+            result = await session.execute(query, {
+                "query": clean_query,
+                "exclude_thread_uid": exclude_thread_uid,
+                "fts_weight": fts_weight,
+                "sem_weight": semantic_weight,
+                "overlap_boost": overlap_boost,
+                "search_limit": search_limit,
+                "limit": limit
+            })
+
+            return [(row[0], float(row[1])) for row in result.fetchall()]
+
+        except Exception as e:
+            # Fallback to vector-only on any error (e.g., missing tsvector column)
+            logger.debug(f"[Discovery] Hybrid search failed, falling back to vector-only: {e}")
+            return await self._search_conversation_messages(
+                session, embedding, exclude_thread_uid, limit
+            )
+
     # ==========================================
     # Manual Discovery API
     # ==========================================
@@ -496,12 +757,23 @@ class KnowledgeDiscoveryService:
     async def discover_now(
         self,
         ref: str,
-        embedding: Optional[List[float]] = None
+        embedding: Optional[List[float]] = None,
+        content: Optional[str] = None
     ) -> List[DiscoveredRelationship]:
         """
         Run discovery immediately for a given reference.
 
         If embedding not provided, fetches it from storage.
+        Uses hybrid search (FTS + vector) for cross-thread message discovery
+        when PostgreSQL is available and content is provided.
+
+        Args:
+            ref: Reference in format "type:id" (e.g., "message:abc123")
+            embedding: Optional pre-computed embedding vector
+            content: Optional content for hybrid FTS search
+
+        Returns:
+            List of discovered relationships
         """
         ref_type, ref_id = ref.split(":", 1)
 
@@ -518,8 +790,24 @@ class KnowledgeDiscoveryService:
 
             # Determine what to search based on ref type
             if ref_type == "message":
-                # Get thread_uid for the message
+                # Get thread_uid and content for the message
                 thread_uid = await self._get_thread_for_message(session, ref_id)
+
+                # Get query text for hybrid search
+                query_text = ""
+                if content:
+                    query_text = self._extract_query_text(content)
+                elif self.config.use_hybrid_search:
+                    # Fetch content from database
+                    tables = _get_conversation_tables()
+                    content_query = text(f"""
+                        SELECT content FROM {tables['messages']}
+                        WHERE message_uid = :message_uid
+                    """)
+                    result = await session.execute(content_query, {"message_uid": ref_id})
+                    row = result.fetchone()
+                    if row and row[0]:
+                        query_text = self._extract_query_text(row[0])
 
                 # Search observations
                 for obs_id, sim in await self._search_memorygate_embeddings(
@@ -555,18 +843,48 @@ class KnowledgeDiscoveryService:
                         ))
 
                 # Search other messages (cross-thread only)
+                # Use hybrid search when configured and available
                 if thread_uid:
-                    for msg_uid, sim in await self._search_conversation_messages(
-                        session, embedding, thread_uid, self.config.top_k
-                    ):
-                        if sim >= self.config.min_similarity:
-                            relationships.append(DiscoveredRelationship(
-                                from_ref=ref, to_ref=f"message:{msg_uid}",
-                                rel_type="similar_to", similarity=sim,
-                                discovered_at=datetime.utcnow()
-                            ))
+                    if self.config.use_hybrid_search and query_text:
+                        message_results = await self._search_conversation_messages_hybrid(
+                            session, embedding, query_text, thread_uid, self.config.top_k
+                        )
+                        # RRF scores: threshold is lower
+                        for msg_uid, score in message_results:
+                            if score >= 0.005:
+                                relationships.append(DiscoveredRelationship(
+                                    from_ref=ref, to_ref=f"message:{msg_uid}",
+                                    rel_type="similar_to", similarity=score,
+                                    discovered_at=datetime.utcnow()
+                                ))
+                    else:
+                        for msg_uid, sim in await self._search_conversation_messages(
+                            session, embedding, thread_uid, self.config.top_k
+                        ):
+                            if sim >= self.config.min_similarity:
+                                relationships.append(DiscoveredRelationship(
+                                    from_ref=ref, to_ref=f"message:{msg_uid}",
+                                    rel_type="similar_to", similarity=sim,
+                                    discovered_at=datetime.utcnow()
+                                ))
 
             elif ref_type == "thread":
+                # Get representative query text from recent messages
+                query_text = ""
+                if self.config.use_hybrid_search:
+                    tables = _get_conversation_tables()
+                    recent_query = text(f"""
+                        SELECT content FROM {tables['messages']}
+                        WHERE thread_uid = :thread_uid
+                        ORDER BY timestamp DESC
+                        LIMIT 3
+                    """)
+                    result = await session.execute(recent_query, {"thread_uid": ref_id})
+                    rows = result.fetchall()
+                    if rows:
+                        combined = " ".join(row[0] for row in rows if row[0])
+                        query_text = self._extract_query_text(combined)
+
                 # Search concepts
                 for concept_id, sim in await self._search_memorygate_embeddings(
                     session, embedding, "concept", self.config.top_k
@@ -578,16 +896,28 @@ class KnowledgeDiscoveryService:
                             discovered_at=datetime.utcnow()
                         ))
 
-                # Search messages in other threads
-                for msg_uid, sim in await self._search_conversation_messages(
-                    session, embedding, ref_id, self.config.top_k
-                ):
-                    if sim >= self.config.min_similarity:
-                        relationships.append(DiscoveredRelationship(
-                            from_ref=ref, to_ref=f"message:{msg_uid}",
-                            rel_type="similar_to", similarity=sim,
-                            discovered_at=datetime.utcnow()
-                        ))
+                # Search messages in other threads (hybrid when available)
+                if self.config.use_hybrid_search and query_text:
+                    message_results = await self._search_conversation_messages_hybrid(
+                        session, embedding, query_text, ref_id, self.config.top_k
+                    )
+                    for msg_uid, score in message_results:
+                        if score >= 0.005:
+                            relationships.append(DiscoveredRelationship(
+                                from_ref=ref, to_ref=f"message:{msg_uid}",
+                                rel_type="similar_to", similarity=score,
+                                discovered_at=datetime.utcnow()
+                            ))
+                else:
+                    for msg_uid, sim in await self._search_conversation_messages(
+                        session, embedding, ref_id, self.config.top_k
+                    ):
+                        if sim >= self.config.min_similarity:
+                            relationships.append(DiscoveredRelationship(
+                                from_ref=ref, to_ref=f"message:{msg_uid}",
+                                rel_type="similar_to", similarity=sim,
+                                discovered_at=datetime.utcnow()
+                            ))
 
             elif ref_type in ("observation", "pattern", "concept"):
                 # Search messages
@@ -698,13 +1028,21 @@ async def stop_discovery():
     await service.stop()
 
 
-async def queue_message_discovery(message_uid: str, thread_uid: str, embedding: List[float]):
+async def queue_message_discovery(
+    message_uid: str,
+    thread_uid: str,
+    embedding: List[float],
+    content: Optional[str] = None
+):
     """Queue a message for discovery."""
     service = get_discovery_service()
-    await service.queue_message_discovery(message_uid, thread_uid, embedding)
+    await service.queue_message_discovery(message_uid, thread_uid, embedding, content)
 
 
-async def discover_for_ref(ref: str) -> List[DiscoveredRelationship]:
+async def discover_for_ref(
+    ref: str,
+    content: Optional[str] = None
+) -> List[DiscoveredRelationship]:
     """Run discovery immediately for a reference."""
     service = get_discovery_service()
-    return await service.discover_now(ref)
+    return await service.discover_now(ref, content=content)
