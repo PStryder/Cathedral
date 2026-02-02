@@ -228,34 +228,39 @@ function scrollToBottom() {
 const activeToolCalls = new Map();
 
 function appendToolCallIndicator(toolName) {
+    Console.info(`appendToolCallIndicator called for: ${toolName}`);
+
     const div = document.createElement('div');
-    div.className = 'flex justify-center my-2 message-enter';
+    div.className = 'flex justify-center my-2';
     div.dataset.toolCall = toolName;
 
-    const id = `tool-${Date.now()}-${toolName}`;
+    const id = `tool-${Date.now()}-${toolName.replace(/[^a-zA-Z0-9]/g, '_')}`;
     div.id = id;
 
     div.innerHTML = `
-        <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-900/40 border border-red-500/50">
-            <span class="inline-block w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
-            <span class="text-xs font-medium text-red-300 mono">${escapeHtml(toolName)}</span>
-            <span class="text-xs text-red-400/70 tool-elapsed"></span>
+        <div style="background: rgba(220, 38, 38, 0.3); border: 2px solid #dc2626; border-radius: 9999px; padding: 6px 12px; display: inline-flex; align-items: center; gap: 8px;">
+            <span style="width: 8px; height: 8px; background: #dc2626; border-radius: 50%; animation: pulse 1s infinite;"></span>
+            <span style="color: #fca5a5; font-size: 12px; font-family: monospace;">${escapeHtml(toolName)}</span>
         </div>
     `;
 
     // Insert before streaming bubble if it exists, otherwise append
     const streamingBubble = document.getElementById('streaming-bubble');
-    if (streamingBubble) {
+    Console.info(`streamingBubble exists: ${!!streamingBubble}, messagesList exists: ${!!elements.messagesList}`);
+
+    if (streamingBubble && elements.messagesList) {
         elements.messagesList.insertBefore(div, streamingBubble);
-    } else {
+        Console.success(`Indicator inserted before streaming bubble`);
+    } else if (elements.messagesList) {
         elements.messagesList.appendChild(div);
+        Console.success(`Indicator appended to messagesList`);
+    } else {
+        Console.error(`Cannot insert indicator - no messagesList!`);
+        return null;
     }
+
     scrollToBottom();
-
-    // Track this call
     activeToolCalls.set(toolName, { id, startTime: Date.now() });
-
-    console.log(`[Tool Indicator] Created for ${toolName}, id=${id}`);
 
     return div;
 }
@@ -445,27 +450,28 @@ async function sendMessage() {
                     try {
                         const data = JSON.parse(line.slice(6));
                         if (data.token) {
-                            // Check for tool markers before adding to display
                             const token = data.token;
-                            const toolMatch = token.match(/\[\[TOOL:(START|OK|ERROR):([^\]]+)\]\]/g);
 
-                            if (toolMatch) {
-                                // Process each tool marker
-                                for (const marker of toolMatch) {
-                                    const parts = marker.match(/\[\[TOOL:(START|OK|ERROR):([^\]]+)\]\]/);
-                                    if (parts) {
-                                        const [, status, toolName] = parts;
-                                        if (status === 'START') {
-                                            appendToolCallIndicator(toolName);
-                                        } else {
-                                            updateToolCallIndicator(toolName, status === 'OK', 0);
-                                        }
+                            // Check for tool markers
+                            if (token.includes('[[TOOL:')) {
+                                Console.info(`MARKER FOUND: ${token.trim()}`);
+
+                                // Parse and show indicators
+                                const markers = token.matchAll(/\[\[TOOL:(START|OK|ERROR):([^\]]+)\]\]/g);
+                                for (const m of markers) {
+                                    const [, status, toolName] = m;
+                                    Console.info(`Parsed: status=${status} tool=${toolName}`);
+                                    if (status === 'START') {
+                                        appendToolCallIndicator(toolName);
+                                    } else {
+                                        updateToolCallIndicator(toolName, status === 'OK', 0);
                                     }
                                 }
-                                // Strip markers from display text
-                                const cleanToken = token.replace(/\[\[TOOL:(START|OK|ERROR):[^\]]+\]\]\n?/g, '');
-                                if (cleanToken) {
-                                    fullResponse += cleanToken;
+
+                                // Strip markers, keep other text
+                                const clean = token.replace(/\[\[TOOL:[^\]]+\]\]\n?/g, '');
+                                if (clean.trim()) {
+                                    fullResponse += clean;
                                     contentEl.textContent = fullResponse;
                                     scrollToBottom();
                                 }
