@@ -305,6 +305,7 @@ class ToolOrchestrator:
 
         current_response = initial_response
         is_first_iteration = True
+        just_streamed = initial_already_streamed  # Track if we just streamed tokens
 
         while self.budget.can_iterate():
             self.budget.use_iteration()
@@ -340,12 +341,14 @@ class ToolOrchestrator:
                         temperature=temperature,
                     ):
                         current_response += token
+                    just_streamed = False  # This response was accumulated, not streamed
 
                     # Continue loop to re-parse the corrected response
                     continue
 
-                # Genuine non-tool response - yield and exit
-                if remaining_text:
+                # Genuine non-tool response - yield only if NOT already streamed
+                # (First iteration: caller streamed; subsequent: we streamed in loop)
+                if remaining_text and not just_streamed:
                     yield remaining_text
                 # Clear current_response to prevent duplicate yield after loop
                 current_response = ""
@@ -359,12 +362,10 @@ class ToolOrchestrator:
                 )
                 tool_calls = tool_calls[: self.budget.max_calls_per_step]
 
-            # Yield any text before tool calls
-            # Skip if: (a) initial response already streamed, OR (b) we just streamed
-            # tokens from reflect_stream (which happens on all iterations after first)
-            # After first iteration, tokens are streamed directly, so remaining_text
-            # would duplicate what was already yielded
-            if remaining_text.strip() and is_first_iteration and not initial_already_streamed:
+            # Yield any text before tool calls (only if not already streamed)
+            # just_streamed is True if: (a) initial response was streamed by caller, OR
+            # (b) we just streamed tokens from reflect_stream in a previous iteration
+            if remaining_text.strip() and not just_streamed:
                 yield remaining_text + "\n"
 
             # Execute tools with inline markers
@@ -415,6 +416,9 @@ class ToolOrchestrator:
             ):
                 current_response += token
                 yield token  # Stream follow-up tokens immediately
+
+            # Mark that we just streamed tokens (prevents duplicate yield on loop exit)
+            just_streamed = True
 
         # Note: We no longer need to yield remaining response here because:
         # - First iteration: tokens already streamed by caller (initial_already_streamed)
