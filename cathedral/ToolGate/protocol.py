@@ -240,6 +240,9 @@ def format_tool_results(results: List[ToolResult]) -> str:
     """
     Format tool results for injection into conversation.
 
+    Uses explicit markers to distinguish from user input.
+    The format is designed to be unambiguous across all model providers.
+
     Args:
         results: List of tool execution results
 
@@ -259,18 +262,21 @@ def format_tool_results(results: List[ToolResult]) -> str:
                 result_str = result_str[:2000] + "...[truncated]"
 
             formatted.append(
-                f"Tool {result.id}: SUCCESS\n"
-                f"Result: {result_str}"
+                f"<tool_result id=\"{result.id}\" status=\"success\">\n"
+                f"{result_str}\n"
+                f"</tool_result>"
             )
         else:
             formatted.append(
-                f"Tool {result.id}: FAILED\n"
-                f"Error: {result.error}"
+                f"<tool_result id=\"{result.id}\" status=\"error\">\n"
+                f"{result.error}\n"
+                f"</tool_result>"
             )
 
-    header = "[TOOL RESULTS]"
+    # Use XML-style tags that models recognize as structured data, not user speech
+    header = "<tool_execution_results>"
     body = "\n\n".join(formatted)
-    footer = "[/TOOL RESULTS]"
+    footer = "</tool_execution_results>"
 
     return f"{header}\n{body}\n{footer}"
 

@@ -39,11 +39,21 @@ def _content_to_text(content: Any) -> str:
 def serialize_messages(messages: List[Dict[str, Any]]) -> str:
     """
     Serialize Cathedral {role, content} messages into a single prompt string.
+
+    Handles special cases:
+    - Tool results (detected by <tool_execution_results>) get TOOL_RESULT label
+    - System messages stay as SYSTEM
+    - User/Assistant messages use their respective labels
     """
     lines: List[str] = []
     for message in messages or []:
         role = str(message.get("role", "user")).upper()
         content = _content_to_text(message.get("content", ""))
+
+        # Detect tool results by content format and relabel
+        if "<tool_execution_results>" in content:
+            role = "TOOL_RESULT"
+
         lines.append(f"{role}:\n{content}".rstrip())
 
     # Encourage CLI tools to respond as the assistant.

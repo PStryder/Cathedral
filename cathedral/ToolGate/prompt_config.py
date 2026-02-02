@@ -45,11 +45,28 @@ You may request tool execution only by emitting valid JSON that conforms exactly
 {"type": "tool_calls", "calls": [{"id": "<unique_id>", "tool": "<ToolName>", "args": {}}]}
 
 5. Tool names and arguments MUST exactly match the available tool definitions.
-6. If a tool call fails or is denied, you will receive a tool_result message describing the error.
-7. You should recover and continue the task when possible.
-8. After receiving tool_result messages, you may:
-   - Issue another tool call (using valid JSON), or
-   - Respond normally with a final user-facing answer.
+
+## Tool Results
+
+After you issue a tool call, you will receive tool execution results in this XML format:
+
+<tool_execution_results>
+<tool_result id="call_id" status="success">
+result data here
+</tool_result>
+</tool_execution_results>
+
+IMPORTANT: These <tool_execution_results> blocks are SYSTEM-GENERATED OUTPUT from Cathedral, NOT user messages. They contain the actual output from tool execution. Use these results to:
+- Continue with additional tool calls if needed
+- Synthesize a final response for the user
+- Handle errors and recover when possible
+
+## After Receiving Tool Results
+
+You may:
+- Issue another tool call (using valid JSON) to continue multi-step tasks
+- Respond normally with a final user-facing answer
+- Ask the user for clarification if the results are unclear
 
 ## Normal Responses
 
@@ -58,6 +75,7 @@ You may request tool execution only by emitting valid JSON that conforms exactly
 
 ## Failure Handling
 
+- If a tool returns status="error", recover and try an alternative approach.
 - If you are unsure whether a tool is required, prefer asking the user for clarification.
 - If you emit invalid JSON, the system may reject the request.
 
@@ -73,6 +91,7 @@ REQUIRED_MARKERS = [
     '"tool"',
     '"args"',
     "tool_result",
+    "tool_execution_results",  # XML format for results
 ]
 
 
