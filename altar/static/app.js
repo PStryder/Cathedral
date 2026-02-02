@@ -874,9 +874,21 @@ async function checkVoiceStatus() {
             }
 
             if (status.available) {
-                Console.info('Voice synthesis available');
+                Console.info(`Voice available: ${status.provider}`);
+                if (status.personaplex_connected) {
+                    Console.info('PersonaPlex connected - full-duplex mode available');
+                }
             } else {
                 Console.info(`Voice unavailable: ${status.error || 'TTS disabled'}`);
+            }
+        }
+
+        // Also check codec info
+        const codecRes = await fetch('/api/voice/codec/info');
+        if (codecRes.ok) {
+            const codec = await codecRes.json();
+            if (codec.available) {
+                Console.info(`Opus codec: ${codec.sample_rate}Hz, ${codec.frame_duration_ms}ms frames`);
             }
         }
     } catch (e) {
@@ -994,6 +1006,219 @@ function closeVoiceStream() {
     audioQueue = [];
     isPlayingAudio = false;
 }
+
+// ========== Full-Duplex Voice Conversation ==========
+
+let conversationSocket = null;
+let mediaStream = null;
+let audioRecorder = null;
+let isRecording = false;
+let currentGenerationId = null;
+
+/**
+ * Initialize full-duplex voice conversation with PersonaPlex.
+ * This enables bidirectional audio streaming with interrupt support.
+ */
+async function initVoiceConversation(threadId) {
+    if (!state.voiceEnabled || !state.voiceAvailable) return false;
+
+    // Request microphone access
+    try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+                sampleRate: 24000,
+                channelCount: 1,
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+            }
+        });
+    } catch (e) {
+        Console.error(`Microphone access denied: ${e.message}`);
+        return false;
+    }
+
+    // Close existing connection
+    if (conversationSocket) {
+        conversationSocket.close();
+        conversationSocket = null;
+    }
+
+    // Reset audio state
+    audioQueue = [];
+    isPlayingAudio = false;
+    currentGenerationId = null;
+
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    conversationSocket = new WebSocket(`${protocol}//${location.host}/api/voice/conversation/${threadId}`);
+    conversationSocket.binaryType = 'arraybuffer';
+
+    conversationSocket.onopen = () => {
+        Console.info('Voice conversation connected');
+        startAudioCapture();
+    };
+
+    conversationSocket.onmessage = async (event) => {
+        if (typeof event.data === 'string') {
+            // JSON message
+            const data = JSON.parse(event.data);
+            handleConversationMessage(data);
+        } else {
+            // Binary audio data from agent
+            if (event.data.byteLength > 0) {
+                audioQueue.push({
+                    data: event.data,
+                    metadata: { sample_rate: 24000, generation_id: currentGenerationId }
+                });
+
+                if (!isPlayingAudio) {
+                    playNextAudioChunk();
+                }
+            }
+        }
+    };
+
+    conversationSocket.onerror = (error) => {
+        Console.error('Voice conversation error');
+    };
+
+    conversationSocket.onclose = () => {
+        Console.info('Voice conversation closed');
+        stopAudioCapture();
+        conversationSocket = null;
+    };
+
+    return true;
+}
+
+function handleConversationMessage(data) {
+    switch (data.type) {
+        case 'connected':
+            Console.success(`Voice session: ${data.session_id}`);
+            break;
+
+        case 'event':
+            // Voice event envelope
+            const event = data.event;
+            if (event.event_type === 'speech_complete') {
+                // Agent finished speaking
+                Console.info('Agent: ' + (event.payload?.text || '').slice(0, 50) + '...');
+            } else if (event.event_type === 'final_transcript') {
+                // User finished speaking
+                Console.info('User: ' + (event.payload?.text || ''));
+            }
+            break;
+
+        case 'audio_meta':
+            currentGenerationId = data.generation_id;
+            break;
+
+        case 'interrupted':
+            Console.info(`Interrupt: cancelled ${data.cancelled_generation_id?.slice(0, 8) || 'none'}`);
+            // Clear audio queue to stop current playback
+            audioQueue = [];
+            currentGenerationId = null;
+            break;
+
+        case 'turn':
+            if (data.state === 'start') {
+                Console.info(`Turn: ${data.source} speaking`);
+            }
+            break;
+
+        case 'transcript':
+            // Real-time transcript update
+            break;
+
+        case 'error':
+            Console.error(`Voice error: ${data.message}`);
+            break;
+    }
+}
+
+function startAudioCapture() {
+    if (!mediaStream || isRecording) return;
+
+    const ctx = initAudioContext();
+
+    // Create audio source from microphone
+    const source = ctx.createMediaStreamSource(mediaStream);
+
+    // Create script processor for raw PCM access
+    // Using 4096 buffer size for ~170ms chunks at 24kHz
+    const processor = ctx.createScriptProcessor(4096, 1, 1);
+
+    processor.onaudioprocess = (e) => {
+        if (!isRecording || !conversationSocket || conversationSocket.readyState !== WebSocket.OPEN) {
+            return;
+        }
+
+        // Get PCM data
+        const inputData = e.inputBuffer.getChannelData(0);
+
+        // Convert float32 to int16
+        const int16Data = new Int16Array(inputData.length);
+        for (let i = 0; i < inputData.length; i++) {
+            const s = Math.max(-1, Math.min(1, inputData[i]));
+            int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+        }
+
+        // Send to server
+        conversationSocket.send(int16Data.buffer);
+    };
+
+    source.connect(processor);
+    processor.connect(ctx.destination);
+
+    audioRecorder = { source, processor };
+    isRecording = true;
+
+    Console.info('Audio capture started');
+}
+
+function stopAudioCapture() {
+    if (audioRecorder) {
+        audioRecorder.source.disconnect();
+        audioRecorder.processor.disconnect();
+        audioRecorder = null;
+    }
+
+    if (mediaStream) {
+        mediaStream.getTracks().forEach(track => track.stop());
+        mediaStream = null;
+    }
+
+    isRecording = false;
+    Console.info('Audio capture stopped');
+}
+
+function sendInterrupt() {
+    if (conversationSocket && conversationSocket.readyState === WebSocket.OPEN) {
+        conversationSocket.send(JSON.stringify({ type: 'interrupt' }));
+    }
+}
+
+function sendSilence() {
+    if (conversationSocket && conversationSocket.readyState === WebSocket.OPEN) {
+        conversationSocket.send(JSON.stringify({ type: 'silence' }));
+    }
+}
+
+function closeVoiceConversation() {
+    stopAudioCapture();
+    if (conversationSocket) {
+        conversationSocket.close();
+        conversationSocket = null;
+    }
+    audioQueue = [];
+    isPlayingAudio = false;
+    currentGenerationId = null;
+}
+
+// Expose for debugging
+window.initVoiceConversation = initVoiceConversation;
+window.closeVoiceConversation = closeVoiceConversation;
+window.sendInterrupt = sendInterrupt;
 
 // ========== Initialize ==========
 
