@@ -284,10 +284,17 @@ async def process_input_stream(
             async def emit_wrapper(event_type: str, message: str, **kwargs):
                 await _emit(services, event_type, message, **kwargs)
 
+            # Budget limits from config (defaults increased for complex tasks)
+            from cathedral import Config
+            max_iters = int(Config.get("TOOL_MAX_ITERATIONS", 15))
+            max_calls = int(Config.get("TOOL_MAX_CALLS_PER_STEP", 10))
+
             orchestrator = ToolGate.get_orchestrator(
                 enabled_policies=list(active_policies),
                 emit_event=emit_wrapper,
                 gate_filter=enabled_gates,
+                max_iterations=max_iters,
+                max_calls_per_step=max_calls,
             )
 
             # Run tool loop and yield tokens

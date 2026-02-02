@@ -243,11 +243,19 @@ function appendToolCallIndicator(toolName) {
         </div>
     `;
 
-    elements.messagesList.appendChild(div);
+    // Insert before streaming bubble if it exists, otherwise append
+    const streamingBubble = document.getElementById('streaming-bubble');
+    if (streamingBubble) {
+        elements.messagesList.insertBefore(div, streamingBubble);
+    } else {
+        elements.messagesList.appendChild(div);
+    }
     scrollToBottom();
 
     // Track this call
     activeToolCalls.set(toolName, { id, startTime: Date.now() });
+
+    console.log(`[Tool Indicator] Created for ${toolName}, id=${id}`);
 
     return div;
 }
@@ -625,12 +633,16 @@ function connectEventSource() {
         const data = JSON.parse(e.data);
         const msg = data.message || '';
 
+        console.log('[EventSource] Tool event received:', msg);
+
         // Handle structured tool events for inline indicators
         if (msg.startsWith('TOOL_START:')) {
             const toolName = msg.split(':')[1];
             Console.tool(`Calling ${toolName}...`);
-            // Always try to show indicator if messagesList exists
-            if (elements.messagesList && !elements.messagesList.classList.contains('hidden')) {
+            // Always try to show indicator if messagesList is visible
+            const listHidden = elements.messagesList?.classList.contains('hidden');
+            console.log(`[Tool] messagesList hidden=${listHidden}, streaming=${state.isStreaming}`);
+            if (elements.messagesList && !listHidden) {
                 appendToolCallIndicator(toolName);
             } else {
                 Console.warning(`Tool indicator skipped: messagesList ${elements.messagesList ? 'hidden' : 'not found'}`);
