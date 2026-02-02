@@ -83,3 +83,4 @@ alembic==1.13.1
 duckduckgo-search>=7.0.0
 soundfile>=0.12.0
 opuslib>=3.0.1
+sphn>=0.1.4

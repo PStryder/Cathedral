@@ -25,7 +25,8 @@ import struct
 import time
 import uuid
 from dataclasses import dataclass
-from typing import AsyncGenerator, Callable, Optional, Dict, Any
+from typing import AsyncGenerator, Callable, Optional, Dict, Any, Union, Awaitable
+import asyncio
 from enum import IntEnum
 
 from cathedral.shared.gate import GateLogger
@@ -59,11 +60,20 @@ class BridgeConfig:
     """Configuration for the voice bridge."""
     personaplex_url: str = "wss://localhost:8998/api/chat"
     voice_prompt: str = "NATF2"
-    text_prompt: str = ""
+    # PersonaPlex requires a non-empty text_prompt (crashes if None/empty)
+    text_prompt: str = "You are a helpful voice assistant."
     sample_rate: int = SAMPLE_RATE
     reconnect_attempts: int = 3
     reconnect_delay: float = 1.0
     ssl_verify: bool = False  # PersonaPlex uses self-signed certs
+    # PersonaPlex model parameters
+    text_temperature: float = 0.8
+    text_topk: int = 250
+    audio_temperature: float = 0.8
+    audio_topk: int = 250
+    pad_mult: float = 1.0
+    repetition_penalty: float = 1.0
+    repetition_penalty_context: float = 1.0
 
 
 class VoiceBridge:
@@ -81,7 +91,7 @@ class VoiceBridge:
     def __init__(
         self,
         config: BridgeConfig,
-        on_event: Optional[Callable[[VoiceEvent], None]] = None,
+        on_event: Optional[Callable[[VoiceEvent], Union[None, Awaitable[None]]]] = None,
     ):
         """
         Initialize the voice bridge.
@@ -117,9 +127,22 @@ class VoiceBridge:
         self._outbound_audio: asyncio.Queue[bytes] = asyncio.Queue()
         self._inbound_events: asyncio.Queue[VoiceEvent] = asyncio.Queue()
 
+    async def _emit_event(self, event: VoiceEvent):
+        """Emit an event, handling both sync and async callbacks."""
+        if self.on_event:
+            result = self.on_event(event)
+            if asyncio.iscoroutine(result):
+                await result
+
     async def connect(self) -> bool:
         """
         Connect to PersonaPlex server.
+
+        PersonaPlex uses a binary protocol:
+        - 0x00 = handshake (server sends first)
+        - 0x01 = audio (Opus encoded, bidirectional)
+        - 0x02 = text (server -> client)
+        - 0x03 = control (client -> server)
 
         Returns:
             True if connected successfully
@@ -140,14 +163,40 @@ class VoiceBridge:
         try:
             import websockets
             import ssl
+            import urllib.parse
+            import random
 
-            # Build WebSocket URL with query params
+            # Build WebSocket URL with ALL required query params
             url = self.config.personaplex_url
-            params = f"?voice_prompt={self.config.voice_prompt}"
-            if self.config.text_prompt:
-                import urllib.parse
-                params += f"&text_prompt={urllib.parse.quote(self.config.text_prompt)}"
-            full_url = url + params
+
+            # Generate random seeds for reproducibility
+            text_seed = random.randint(0, 2**31)
+            audio_seed = random.randint(0, 2**31)
+
+            # PersonaPlex requires these query parameters
+            # voice_prompt must include .pt extension if it's a file
+            voice_prompt = self.config.voice_prompt
+            if not voice_prompt.endswith('.pt'):
+                voice_prompt = f"{voice_prompt}.pt"
+
+            # text_prompt must be non-empty or PersonaPlex crashes
+            text_prompt = self.config.text_prompt or "You are a helpful voice assistant."
+
+            params = {
+                "voice_prompt": voice_prompt,
+                "text_prompt": text_prompt,
+                "text_temperature": str(self.config.text_temperature),
+                "text_topk": str(self.config.text_topk),
+                "audio_temperature": str(self.config.audio_temperature),
+                "audio_topk": str(self.config.audio_topk),
+                "pad_mult": str(self.config.pad_mult),
+                "repetition_penalty": str(self.config.repetition_penalty),
+                "repetition_penalty_context": str(self.config.repetition_penalty_context),
+                "text_seed": str(text_seed),
+                "audio_seed": str(audio_seed),
+            }
+            query_string = urllib.parse.urlencode(params)
+            full_url = f"{url}?{query_string}"
 
             # SSL context for self-signed certs
             ssl_context = None
@@ -157,19 +206,35 @@ class VoiceBridge:
                 ssl_context.verify_mode = ssl.CERT_NONE
 
             _log.info(f"Connecting to PersonaPlex: {url}")
+            _log.debug(f"Full URL: {full_url[:200]}...")
 
             self._websocket = await asyncio.wait_for(
                 websockets.connect(
                     full_url,
                     ssl=ssl_context,
-                    ping_interval=20,
-                    ping_timeout=10,
+                    ping_interval=None,  # Disable ping - PersonaPlex doesn't respond
+                    ping_timeout=None,
                 ),
                 timeout=10.0
             )
 
+            _log.info("WebSocket connected, waiting for handshake...")
+
+            # Wait for handshake message (0x00) from server
+            # PersonaPlex processes system prompts before sending handshake - can take 30+ seconds
+            try:
+                handshake = await asyncio.wait_for(self._websocket.recv(), timeout=60.0)
+                if isinstance(handshake, bytes) and len(handshake) >= 1 and handshake[0] == 0x00:
+                    _log.info(f"Received handshake: {handshake.hex()}")
+                else:
+                    _log.warning(f"Unexpected handshake: {handshake!r}")
+            except asyncio.TimeoutError:
+                _log.error("No handshake received from PersonaPlex")
+                await self._websocket.close()
+                return False
+
             self._connected = True
-            _log.info("Connected to PersonaPlex")
+            _log.info("Connected to PersonaPlex (handshake complete)")
 
             # Start receive and send loops
             self._recv_task = asyncio.create_task(self._receive_loop())
@@ -182,6 +247,8 @@ class VoiceBridge:
             return False
         except Exception as e:
             _log.error(f"Failed to connect to PersonaPlex: {e}")
+            import traceback
+            _log.error(traceback.format_exc())
             return False
         finally:
             self._connecting = False
@@ -213,51 +280,115 @@ class VoiceBridge:
         _log.info("Disconnected from PersonaPlex")
 
     async def _receive_loop(self):
-        """Receive messages from PersonaPlex."""
+        """
+        Receive messages from PersonaPlex.
+
+        Binary protocol:
+        - 0x00 = handshake (already handled in connect)
+        - 0x01 = audio (Opus encoded)
+        - 0x02 = text output
+        - 0x03 = control
+        - 0x05 = error
+        """
         try:
+            _log.info("Receive loop started, waiting for messages...")
+            msg_count = 0
             async for message in self._websocket:
-                if isinstance(message, bytes):
-                    # Binary message - audio from agent
-                    await self._handle_audio_message(message)
+                msg_count += 1
+
+                if not isinstance(message, bytes) or len(message) < 1:
+                    _log.warning(f"Unexpected message format: {type(message)}")
+                    continue
+
+                msg_type = message[0]
+                payload = message[1:] if len(message) > 1 else b""
+
+                # Log every 50th message or any audio message
+                if msg_count % 50 == 1 or msg_type == 0x01:
+                    _log.info(f"Msg #{msg_count}: type=0x{msg_type:02x}, payload={len(payload)} bytes")
+
+                if msg_type == 0x01:
+                    # Audio message (Opus encoded)
+                    if payload:
+                        _log.info(f"Received audio from PersonaPlex: {len(payload)} bytes")
+                        await self._handle_audio_message(payload)
+
+                elif msg_type == 0x02:
+                    # Text message (UTF-8)
+                    try:
+                        text = payload.decode("utf-8")
+                        _log.info(f"Received text: {text[:100]}...")
+                        await self._handle_text_token(text)
+                    except UnicodeDecodeError:
+                        _log.warning(f"Invalid UTF-8 in text message")
+
+                elif msg_type == 0x05:
+                    # Error message
+                    try:
+                        error_text = payload.decode("utf-8")
+                        _log.error(f"PersonaPlex error: {error_text}")
+                    except UnicodeDecodeError:
+                        _log.error(f"PersonaPlex error (binary): {payload.hex()}")
+
+                elif msg_type == 0x00:
+                    # Late handshake (ignore, already handled)
+                    _log.debug("Received late handshake, ignoring")
+
                 else:
-                    # Text message - JSON
-                    await self._handle_text_message(message)
+                    _log.debug(f"Unknown message type: 0x{msg_type:02x}")
+
+            _log.info(f"Receive loop ended normally after {msg_count} messages")
 
         except asyncio.CancelledError:
             raise
         except Exception as e:
             _log.error(f"Receive loop error: {e}")
+            import traceback
+            _log.error(f"Traceback: {traceback.format_exc()}")
             self._connected = False
 
     async def _send_loop(self):
-        """Send audio to PersonaPlex."""
+        """Send audio to PersonaPlex with binary protocol."""
+        _log.info("Send loop started")
+        frames_sent = 0
         try:
             while self._connected:
                 try:
-                    # Get audio from outbound queue with timeout
-                    audio_data = await asyncio.wait_for(
+                    # Get Opus audio from outbound queue with timeout
+                    opus_data = await asyncio.wait_for(
                         self._outbound_audio.get(),
                         timeout=0.1
                     )
 
-                    if self._websocket and self._connected:
-                        await self._websocket.send(audio_data)
+                    if self._websocket and self._connected and opus_data:
+                        # Prefix with message type 0x01 (audio)
+                        message = bytes([0x01]) + opus_data
+                        await self._websocket.send(message)
+                        frames_sent += 1
+                        if frames_sent == 1:
+                            _log.info(f"First Opus frame: {len(opus_data)} bytes, header: {opus_data[:20].hex() if len(opus_data) >= 20 else opus_data.hex()}")
+                        if frames_sent % 50 == 1:
+                            _log.info(f"Sent {frames_sent} audio frames to PersonaPlex ({len(opus_data)} bytes each)")
 
                 except asyncio.TimeoutError:
                     continue
 
         except asyncio.CancelledError:
+            _log.info(f"Send loop cancelled after {frames_sent} frames")
             raise
         except Exception as e:
             _log.error(f"Send loop error: {e}")
             self._connected = False
 
-    async def _handle_audio_message(self, data: bytes):
-        """Handle incoming audio from PersonaPlex."""
+    async def _handle_audio_message(self, opus_data: bytes):
+        """Handle incoming Opus audio from PersonaPlex."""
         # Decode Opus to PCM
-        pcm_data = self._codec.decode(data)
+        pcm_data = self._codec.decode(opus_data)
         if not pcm_data:
+            _log.warning(f"Failed to decode {len(opus_data)} bytes of Opus")
             return
+
+        _log.info(f"Decoded Opus to PCM: {len(pcm_data)} bytes")
 
         # Generate event
         if self._current_generation_id is None:
@@ -271,8 +402,7 @@ class VoiceBridge:
         )
 
         # Emit event
-        if self.on_event:
-            self.on_event(event)
+        await self._emit_event(event)
 
         # Queue for output
         await self._speech_queue.enqueue(
@@ -282,6 +412,28 @@ class VoiceBridge:
         )
 
         await self._inbound_events.put(event)
+
+    async def _handle_text_token(self, text: str):
+        """Handle incoming text token from PersonaPlex."""
+        self._agent_text_buffer += text
+
+        # Emit text token event for real-time display
+        if self._current_generation_id is None:
+            self._current_generation_id = str(uuid.uuid4())
+            self._current_turn_id = self._current_turn_id or str(uuid.uuid4())
+
+        # Create event for the text token
+        event = VoiceEvent(
+            event_id=str(uuid.uuid4()),
+            turn_id=self._current_turn_id,
+            generation_id=self._current_generation_id,
+            source="agent",
+            channel=Channel.TRANSCRIPT,
+            type=EventType.TEXT_TOKEN,
+            commit=CommitLevel.EPHEMERAL,
+            payload={"token": text, "buffer": self._agent_text_buffer},
+        )
+        await self._emit_event(event)
 
     async def _handle_text_message(self, message: str):
         """Handle incoming text message from PersonaPlex."""
@@ -305,8 +457,7 @@ class VoiceBridge:
                         text=text,
                     )
 
-                    if self.on_event:
-                        self.on_event(event)
+                    await self._emit_event(event)
 
                     await self._inbound_events.put(event)
 
@@ -341,10 +492,14 @@ class VoiceBridge:
             True if sent successfully
         """
         if not self._connected:
+            _log.warning("send_audio called but not connected")
             return False
+
+        _log.debug(f"send_audio: received {len(pcm_data)} bytes PCM")
 
         # Encode to Opus
         opus_frames = self._codec.encoder.encode_frames(pcm_data)
+        _log.debug(f"send_audio: encoded to {len(opus_frames)} Opus frames")
 
         for frame in opus_frames:
             await self._outbound_audio.put(frame)
@@ -372,8 +527,7 @@ class VoiceBridge:
             cancelled_generation_id=cancelled_id,
         )
 
-        if self.on_event:
-            self.on_event(event)
+        await self._emit_event(event)
 
         # Reset agent state
         self._current_generation_id = None
@@ -405,8 +559,13 @@ class VoiceBridge:
 
         Yields PCM audio chunks for playback.
         """
+        _log.info("stream_audio: Starting to yield chunks from speech queue")
+        chunk_count = 0
         async for chunk in self._speech_queue.stream():
             if chunk.data:
+                chunk_count += 1
+                if chunk_count <= 3 or chunk_count % 10 == 0:
+                    _log.info(f"stream_audio: Yielding chunk #{chunk_count}, {len(chunk.data)} bytes")
                 yield chunk.data
 
     def start_turn(self, source: str = "user") -> str:

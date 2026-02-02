@@ -250,12 +250,47 @@ def create_router(emit_event: Callable = None) -> APIRouter:
             ),
         )
 
+        # Track audio chunks sent
+        audio_chunks_sent = [0]
+
         # Event handler - forwards events to browser
         async def on_voice_event(event: VoiceEvent):
             # Write to transcript (handles commit level filtering)
             await transcript_writer.write(event)
 
-            # Forward to browser
+            # If this is a text token, send to browser for chat display
+            if event.type.value == "text_token" and event.payload:
+                token = event.payload.get("token", "")
+                buffer = event.payload.get("buffer", "")
+                try:
+                    await websocket.send_json({
+                        "type": "text_token",
+                        "token": token,
+                        "buffer": buffer,
+                        "generation_id": event.generation_id,
+                    })
+                except Exception:
+                    pass
+
+            # If this is a speech chunk, send audio directly to browser
+            if event.type.value == "speech_chunk" and event.payload:
+                audio_data = event.payload.get("audio_data")
+                if audio_data and isinstance(audio_data, bytes):
+                    audio_chunks_sent[0] += 1
+                    try:
+                        # Send audio metadata
+                        await websocket.send_json({
+                            "type": "audio_meta",
+                            "generation_id": event.generation_id,
+                            "chunk_num": audio_chunks_sent[0],
+                            "is_final": False,
+                        })
+                        # Send audio data directly
+                        await websocket.send_bytes(audio_data)
+                    except Exception:
+                        pass
+
+            # Forward event to browser (for transcripts, etc.)
             try:
                 await websocket.send_json({
                     "type": "event",
@@ -268,13 +303,20 @@ def create_router(emit_event: Callable = None) -> APIRouter:
                         "event_type": event.type.value,
                         "commit": event.commit.value,
                         "ts": event.ts,
-                        "payload": event.payload,
+                        # Don't send raw audio in JSON payload
+                        "payload": {k: v for k, v in (event.payload or {}).items() if k != "audio_data"},
                     }
                 })
             except Exception:
                 pass  # WebSocket may be closed
 
         bridge.on_event = on_voice_event
+
+        # Send "connecting" message before the potentially long PersonaPlex handshake
+        await websocket.send_json({
+            "type": "connecting",
+            "message": "Connecting to PersonaPlex (this may take up to 30 seconds)...",
+        })
 
         # Connect to PersonaPlex
         connected = await bridge.connect()
@@ -354,9 +396,16 @@ def create_router(emit_event: Callable = None) -> APIRouter:
 
             # Task: Receive from PersonaPlex, send to browser
             async def send_to_browser():
+                import logging
+                log = logging.getLogger("cathedral.VoiceGate.SendToBrowser")
+                log.info("send_to_browser task started")
+                chunks_sent = 0
                 try:
                     async for chunk in bridge.stream_audio():
                         if chunk:
+                            chunks_sent += 1
+                            if chunks_sent <= 3 or chunks_sent % 10 == 0:
+                                log.info(f"Sending chunk #{chunks_sent} to browser: {len(chunk)} bytes")
                             # Send audio metadata
                             await websocket.send_json({
                                 "type": "audio_meta",
@@ -367,10 +416,10 @@ def create_router(emit_event: Callable = None) -> APIRouter:
                             await websocket.send_bytes(chunk)
 
                 except asyncio.CancelledError:
+                    log.info(f"send_to_browser cancelled after {chunks_sent} chunks")
                     raise
                 except Exception as e:
-                    if emit_event:
-                        await emit_event("voice", f"Send error: {e}")
+                    log.error(f"Send error after {chunks_sent} chunks: {e}")
 
             # Run both tasks
             receive_task = asyncio.create_task(receive_from_browser())

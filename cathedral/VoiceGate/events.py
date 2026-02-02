@@ -43,6 +43,7 @@ class EventType(str, Enum):
     # Transcript events
     PARTIAL_TRANSCRIPT = "partial_transcript"  # ephemeral
     FINAL_TRANSCRIPT = "final_transcript"      # committed
+    TEXT_TOKEN = "text_token"                  # ephemeral (streaming text)
 
     # Speech events
     SPEECH_CHUNK = "speech_chunk"              # ephemeral (audio frame)

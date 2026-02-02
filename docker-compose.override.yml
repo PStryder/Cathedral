@@ -22,5 +22,5 @@ services:
       # (Opus codec stays in PersonaPlex, Cathedral receives PCM)
       - TTS_ENABLED=true
       - TTS_PROVIDER=personaplex
-      - PERSONAPLEX_URL=wss://host.docker.internal:8998
+      - PERSONAPLEX_URL=wss://host.docker.internal:8998/api/chat
       - PERSONAPLEX_VOICE=NATF2

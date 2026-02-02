@@ -133,6 +133,16 @@
         .console-line.security { color: #f472b6; }
         .console-line.tool { color: #34d399; }
 
+        /* Mic button recording animation */
+        @keyframes pulse-recording {
+            0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7); }
+            50% { opacity: 0.9; box-shadow: 0 0 0 8px rgba(220, 38, 38, 0); }
+        }
+
+        .mic-recording {
+            animation: pulse-recording 1.5s ease-in-out infinite;
+        }
+
         /* Tool execution inline display */
         .tool-execution {
             background: linear-gradient(135deg, #064e3b 0%, #022c22 100%);
@@ -300,6 +310,13 @@
                                     <span class="text-orange-400">&#128266;</span>
                                     <span id="voiceLabel" class="voice-label">Voice</span>
                                 </label>
+                                <button id="micButton"
+                                        class="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs transition-colors bg-gray-700 hover:bg-gray-600 text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        title="Start voice conversation (microphone)"
+                                        disabled>
+                                    <span id="micIcon">&#127908;</span>
+                                    <span id="micLabel">Mic</span>
+                                </button>
                             </div>
                         </div>
                         <span id="streamingStatus" class="hidden">
@@ -342,6 +359,6 @@
     <!-- Hidden audio element for TTS playback -->
     <audio id="ttsAudio" style="display:none;"></audio>
 
-    <script src="/static/app.js?v=20260202a"></script>
+    <script src="/static/app.js?v=20260202c"></script>
 </body>
 </html>

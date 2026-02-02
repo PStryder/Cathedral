@@ -12,6 +12,9 @@ const state = {
     isEditingThreadName: false,
     voiceEnabled: false,  // Voice output (TTS)
     voiceAvailable: false,  // Whether voice is available on server
+    micActive: false,  // Whether microphone is currently active
+    voiceConnecting: false,  // Whether PersonaPlex connection is in progress
+    voiceConnected: false,  // Whether PersonaPlex connection is ready
     // Per-gate enablement
     enabledGates: {
         MemoryGate: false,
@@ -63,7 +66,11 @@ const elements = {
     // Voice toggle
     voiceToggle: document.getElementById('voiceToggle'),
     voiceLabel: document.getElementById('voiceLabel'),
-    ttsAudio: document.getElementById('ttsAudio')
+    ttsAudio: document.getElementById('ttsAudio'),
+    // Microphone button
+    micButton: document.getElementById('micButton'),
+    micIcon: document.getElementById('micIcon'),
+    micLabel: document.getElementById('micLabel')
 };
 
 // ========== Thread Management ==========
@@ -131,6 +138,13 @@ async function createNewThread() {
 }
 
 async function switchThread(uid, name) {
+    // Close any active voice conversation when switching threads
+    if (state.micActive) {
+        closeVoiceConversation();
+        state.micActive = false;
+        updateMicButtonUI(false);
+    }
+
     state.currentThreadUid = uid;
     state.currentThreadName = name || 'Unnamed Thread';
 
@@ -144,6 +158,16 @@ async function switchThread(uid, name) {
     document.querySelectorAll('.thread-item').forEach(item => {
         item.classList.toggle('active', item.dataset.uid === uid);
     });
+
+    // Update mic button state (now that thread is selected)
+    updateMicButtonState();
+
+    // If voice is enabled but not connected, pre-connect now that we have a thread
+    if (state.voiceEnabled && !state.voiceConnected && !state.voiceConnecting) {
+        state.voiceConnecting = true;
+        updateMicButtonState();
+        preConnectVoice(uid);
+    }
 
     // Load history
     await loadThreadHistory(uid);
@@ -758,22 +782,172 @@ if (elements.contextToggle) {
     });
 }
 
-// Voice toggle
+// Voice toggle - pre-connects to PersonaPlex when enabled
 if (elements.voiceToggle) {
-    elements.voiceToggle.addEventListener('change', (e) => {
+    elements.voiceToggle.addEventListener('change', async (e) => {
         state.voiceEnabled = e.target.checked;
         if (elements.voiceLabel) {
             elements.voiceLabel.className = e.target.checked ? 'voice-label font-medium' : 'voice-label';
         }
-        Console.info(e.target.checked
-            ? 'Voice output enabled'
-            : 'Voice output disabled');
 
-        // Close voice stream if disabled
-        if (!e.target.checked) {
+        if (e.target.checked) {
+            // Voice enabled - pre-connect to PersonaPlex
+            Console.info('Voice enabled - connecting to PersonaPlex...');
+            state.voiceConnecting = true;
+            state.voiceConnected = false;
+            updateMicButtonState();
+
+            // Start pre-connection (don't await - let it happen in background)
+            preConnectVoice(state.currentThreadUid);
+        } else {
+            // Voice disabled - close everything
+            Console.info('Voice output disabled');
+            closeVoiceConversation();
             closeVoiceStream();
+            state.voiceConnecting = false;
+            state.voiceConnected = false;
+        }
+
+        // Update mic button state
+        updateMicButtonState();
+    });
+}
+
+// Microphone button click handler - controls WebSocket lifecycle directly
+// OFF → WS closed, ON → WS open + stream active
+if (elements.micButton) {
+    elements.micButton.addEventListener('click', async () => {
+        if (!state.currentThreadUid || !state.voiceAvailable) return;
+
+        // Don't allow click while connecting
+        if (state.voiceConnecting) {
+            Console.info('Please wait for PersonaPlex connection...');
+            return;
+        }
+
+        if (state.micActive) {
+            // === MIC OFF: Stop audio capture (keep connection for next use) ===
+            Console.info('Stopping microphone...');
+            stopAudioCapture();
+            state.micActive = false;
+            updateMicButtonState();
+            Console.info('Microphone stopped');
+        } else {
+            // === MIC ON: Start audio capture ===
+            if (!state.voiceConnected) {
+                Console.error('Voice not connected - enable voice toggle first');
+                return;
+            }
+
+            // Request microphone access if needed
+            if (!mediaStream) {
+                try {
+                    mediaStream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            sampleRate: 24000,
+                            channelCount: 1,
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true,
+                        }
+                    });
+                } catch (e) {
+                    Console.error(`Microphone access denied: ${e.message}`);
+                    return;
+                }
+            }
+
+            state.micActive = true;
+            startAudioCapture();
+            updateMicButtonState();
+            playActivationCue();
+            Console.success('Voice conversation started - speak into microphone');
         }
     });
+}
+
+/**
+ * Play a subtle audio cue when mic is activated.
+ * Creates a soft "click" using Web Audio API synthesis.
+ */
+function playActivationCue() {
+    try {
+        const ctx = initAudioContext();
+
+        // Create a soft click: quick sine burst with fast decay
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, ctx.currentTime);  // A5
+        osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.05);
+
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);  // Subtle volume
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.1);
+    } catch (e) {
+        // Silently ignore audio cue failures
+    }
+}
+
+function updateMicButtonState() {
+    if (!elements.micButton) return;
+
+    // Enable mic button only when: voice available AND connected AND thread selected
+    const canUseMic = state.voiceAvailable && state.voiceConnected && state.currentThreadUid;
+    elements.micButton.disabled = !canUseMic && !state.voiceConnecting;
+
+    if (state.voiceConnecting) {
+        // Show connecting state
+        updateMicButtonUI('connecting');
+    } else if (!canUseMic) {
+        // Reset to inactive state if disabled
+        if (state.micActive) {
+            closeVoiceConversation();
+            state.micActive = false;
+        }
+        updateMicButtonUI(false);
+    } else if (state.micActive) {
+        updateMicButtonUI(true);
+    } else {
+        // Ready but not active
+        updateMicButtonUI('ready');
+    }
+}
+
+function updateMicButtonUI(mode) {
+    if (!elements.micButton) return;
+
+    if (mode === true || mode === 'active') {
+        // Active/recording state - red pulsing
+        elements.micButton.className = 'flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs transition-colors bg-red-600 hover:bg-red-700 text-white mic-recording';
+        if (elements.micIcon) elements.micIcon.innerHTML = '&#128308;'; // Red circle
+        if (elements.micLabel) elements.micLabel.textContent = 'Listening...';
+        elements.micButton.title = 'Click to stop voice conversation';
+    } else if (mode === 'connecting') {
+        // Connecting state - yellow/amber
+        elements.micButton.className = 'flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs transition-colors bg-yellow-600 text-white cursor-wait';
+        if (elements.micIcon) elements.micIcon.innerHTML = '&#8987;'; // Hourglass
+        if (elements.micLabel) elements.micLabel.textContent = 'Connecting...';
+        elements.micButton.title = 'Connecting to PersonaPlex...';
+    } else if (mode === 'ready') {
+        // Ready state - green tint to show it's ready
+        elements.micButton.className = 'flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs transition-colors bg-green-700 hover:bg-green-600 text-white';
+        if (elements.micIcon) elements.micIcon.innerHTML = '&#127908;'; // Microphone
+        if (elements.micLabel) elements.micLabel.textContent = 'Mic Ready';
+        elements.micButton.title = 'Click to start voice conversation';
+    } else {
+        // Inactive/disabled state
+        elements.micButton.className = 'flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs transition-colors bg-gray-700 hover:bg-gray-600 text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed';
+        if (elements.micIcon) elements.micIcon.innerHTML = '&#127908;'; // Microphone
+        if (elements.micLabel) elements.micLabel.textContent = 'Mic';
+        elements.micButton.title = 'Enable voice to use microphone';
+    }
 }
 
 // Thread name editing
@@ -846,6 +1020,11 @@ let audioQueue = [];
 let isPlayingAudio = false;
 let voiceSocket = null;
 
+// Gapless playback scheduling
+let nextPlaybackTime = 0;          // When next chunk should start
+const MIN_BUFFER_CHUNKS = 3;       // Buffer this many chunks before starting
+const SCHEDULE_AHEAD_TIME = 0.1;   // Schedule 100ms ahead
+
 function initAudioContext() {
     if (!audioContext) {
         audioContext = new (window.AudioContext || window.webkitAudioContext)({
@@ -895,6 +1074,9 @@ async function checkVoiceStatus() {
         // Voice endpoint may not exist
         state.voiceAvailable = false;
     }
+
+    // Update mic button state after voice status is determined
+    updateMicButtonState();
 }
 
 function initVoiceStream(threadId) {
@@ -909,6 +1091,7 @@ function initVoiceStream(threadId) {
     // Reset audio state
     audioQueue = [];
     isPlayingAudio = false;
+    nextPlaybackTime = 0;
 
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     voiceSocket = new WebSocket(`${protocol}//${location.host}/api/voice/${threadId}`);
@@ -958,44 +1141,83 @@ function initVoiceStream(threadId) {
     };
 }
 
-async function playNextAudioChunk() {
+/**
+ * Schedule audio chunks for gapless playback.
+ * Uses Web Audio API scheduling to avoid gaps between chunks.
+ */
+function scheduleAudioPlayback() {
     if (audioQueue.length === 0) {
-        isPlayingAudio = false;
+        Console.info('scheduleAudioPlayback: queue empty');
         return;
     }
 
-    isPlayingAudio = true;
-    const { data, metadata } = audioQueue.shift();
+    const ctx = initAudioContext();
+    Console.info(`AudioContext state: ${ctx.state}, sampleRate: ${ctx.sampleRate}`);
+    const currentTime = ctx.currentTime;
 
-    try {
-        const ctx = initAudioContext();
-
-        // Convert PCM to AudioBuffer
-        // Assuming 16-bit signed PCM, mono, at sample_rate
-        const sampleRate = metadata?.sample_rate || 24000;
-        const int16Array = new Int16Array(data);
-        const float32Array = new Float32Array(int16Array.length);
-
-        // Convert int16 to float32
-        for (let i = 0; i < int16Array.length; i++) {
-            float32Array[i] = int16Array[i] / 32768.0;
-        }
-
-        // Create audio buffer
-        const audioBuffer = ctx.createBuffer(1, float32Array.length, sampleRate);
-        audioBuffer.getChannelData(0).set(float32Array);
-
-        // Play the buffer
-        const source = ctx.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(ctx.destination);
-        source.onended = playNextAudioChunk;
-        source.start();
-
-    } catch (e) {
-        Console.error(`Audio playback error: ${e.message}`);
-        playNextAudioChunk(); // Try next chunk
+    // If we fell behind (gap in audio), reset scheduling
+    if (nextPlaybackTime < currentTime) {
+        nextPlaybackTime = currentTime + 0.01; // Small buffer
     }
+
+    let scheduledCount = 0;
+    // Schedule all queued chunks
+    while (audioQueue.length > 0) {
+        const { data, metadata } = audioQueue.shift();
+
+        try {
+            const sampleRate = metadata?.sample_rate || 24000;
+            const int16Array = new Int16Array(data);
+            const float32Array = new Float32Array(int16Array.length);
+
+            // Check if data is non-zero
+            let maxVal = 0;
+            for (let i = 0; i < Math.min(100, int16Array.length); i++) {
+                maxVal = Math.max(maxVal, Math.abs(int16Array[i]));
+            }
+            Console.info(`Scheduling chunk: ${int16Array.length} samples at ${sampleRate}Hz, maxVal=${maxVal}`);
+
+            // Convert int16 to float32
+            for (let i = 0; i < int16Array.length; i++) {
+                float32Array[i] = int16Array[i] / 32768.0;
+            }
+
+            // Create audio buffer
+            const audioBuffer = ctx.createBuffer(1, float32Array.length, sampleRate);
+            audioBuffer.getChannelData(0).set(float32Array);
+
+            // Schedule the buffer at precise time
+            const source = ctx.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(ctx.destination);
+
+            // Play immediately for first chunk, then schedule subsequent ones
+            if (scheduledCount === 0) {
+                source.start(0);  // Play immediately
+                nextPlaybackTime = ctx.currentTime + (audioBuffer.length / sampleRate);
+            } else {
+                source.start(nextPlaybackTime);
+                nextPlaybackTime += audioBuffer.length / sampleRate;
+            }
+            scheduledCount++;
+
+        } catch (e) {
+            Console.error(`Audio schedule error: ${e.message}`);
+        }
+    }
+    Console.info(`Scheduled ${scheduledCount} audio chunks, next play at ${nextPlaybackTime.toFixed(3)}s`);
+}
+
+async function playNextAudioChunk() {
+    // Wait for minimum buffer before starting playback
+    if (!isPlayingAudio && audioQueue.length < MIN_BUFFER_CHUNKS) {
+        Console.info(`Buffering audio: ${audioQueue.length}/${MIN_BUFFER_CHUNKS} chunks`);
+        return; // Wait for more chunks
+    }
+
+    Console.info(`Starting audio playback with ${audioQueue.length} chunks queued`);
+    isPlayingAudio = true;
+    scheduleAudioPlayback();
 }
 
 function closeVoiceStream() {
@@ -1005,6 +1227,7 @@ function closeVoiceStream() {
     }
     audioQueue = [];
     isPlayingAudio = false;
+    nextPlaybackTime = 0;
 }
 
 // ========== Full-Duplex Voice Conversation ==========
@@ -1016,11 +1239,103 @@ let isRecording = false;
 let currentGenerationId = null;
 
 /**
+ * Pre-connect to PersonaPlex when voice is enabled.
+ * This establishes the WebSocket connection in advance so the mic button
+ * is immediately responsive (PersonaPlex handshake takes 30+ seconds).
+ */
+async function preConnectVoice(threadId) {
+    if (!threadId) {
+        Console.info('Select a thread to enable voice');
+        state.voiceConnecting = false;
+        updateMicButtonState();
+        return;
+    }
+    if (!state.voiceAvailable) {
+        Console.error('Voice service not available');
+        state.voiceConnecting = false;
+        updateMicButtonState();
+        return;
+    }
+
+    // Close existing connection
+    if (conversationSocket) {
+        conversationSocket.close();
+        conversationSocket = null;
+    }
+
+    // Reset audio state
+    audioQueue = [];
+    isPlayingAudio = false;
+    nextPlaybackTime = 0;
+    currentGenerationId = null;
+
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    conversationSocket = new WebSocket(`${protocol}//${location.host}/api/voice/conversation/${threadId}`);
+    conversationSocket.binaryType = 'arraybuffer';
+
+    conversationSocket.onopen = () => {
+        Console.info('Voice WebSocket opened, waiting for PersonaPlex handshake...');
+    };
+
+    conversationSocket.onmessage = async (event) => {
+        if (typeof event.data === 'string') {
+            const data = JSON.parse(event.data);
+            handleConversationMessage(data);
+        } else {
+            // Binary audio data from agent
+            if (event.data.byteLength > 0) {
+                audioQueue.push({
+                    data: event.data,
+                    metadata: { sample_rate: 24000, generation_id: currentGenerationId }
+                });
+                if (!isPlayingAudio) {
+                    playNextAudioChunk();
+                }
+            }
+        }
+    };
+
+    conversationSocket.onerror = (error) => {
+        Console.error('Voice connection error');
+        state.voiceConnecting = false;
+        state.voiceConnected = false;
+        updateMicButtonState();
+    };
+
+    conversationSocket.onclose = () => {
+        Console.info('Voice connection closed');
+        stopAudioCapture();
+        conversationSocket = null;
+        state.voiceConnecting = false;
+        state.voiceConnected = false;
+        if (state.micActive) {
+            state.micActive = false;
+            updateMicButtonUI(false);
+        }
+        updateMicButtonState();
+    };
+}
+
+/**
  * Initialize full-duplex voice conversation with PersonaPlex.
  * This enables bidirectional audio streaming with interrupt support.
  */
 async function initVoiceConversation(threadId) {
     if (!state.voiceEnabled || !state.voiceAvailable) return false;
+
+    // If not pre-connected, connect now
+    if (!conversationSocket || conversationSocket.readyState !== WebSocket.OPEN) {
+        await preConnectVoice(threadId);
+        // Wait for connection (with timeout)
+        for (let i = 0; i < 600; i++) {  // 60 second timeout
+            if (state.voiceConnected) break;
+            await new Promise(r => setTimeout(r, 100));
+        }
+        if (!state.voiceConnected) {
+            Console.error('Voice connection timeout');
+            return false;
+        }
+    }
 
     // Request microphone access
     try {
@@ -1047,6 +1362,7 @@ async function initVoiceConversation(threadId) {
     // Reset audio state
     audioQueue = [];
     isPlayingAudio = false;
+    nextPlaybackTime = 0;
     currentGenerationId = null;
 
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -1054,8 +1370,8 @@ async function initVoiceConversation(threadId) {
     conversationSocket.binaryType = 'arraybuffer';
 
     conversationSocket.onopen = () => {
-        Console.info('Voice conversation connected');
-        startAudioCapture();
+        Console.info('Voice conversation opened, waiting for PersonaPlex...');
+        // Don't start audio capture yet - wait for 'connected' message
     };
 
     conversationSocket.onmessage = async (event) => {
@@ -1071,8 +1387,12 @@ async function initVoiceConversation(threadId) {
                     metadata: { sample_rate: 24000, generation_id: currentGenerationId }
                 });
 
+                // Always try to schedule - scheduleAudioPlayback handles the queue
                 if (!isPlayingAudio) {
                     playNextAudioChunk();
+                } else {
+                    // Already playing - schedule new chunks immediately
+                    scheduleAudioPlayback();
                 }
             }
         }
@@ -1086,23 +1406,79 @@ async function initVoiceConversation(threadId) {
         Console.info('Voice conversation closed');
         stopAudioCapture();
         conversationSocket = null;
+        // Reset mic button state if it was active
+        if (state.micActive) {
+            state.micActive = false;
+            updateMicButtonUI(false);
+        }
     };
 
     return true;
 }
 
+// Voice response streaming state
+let voiceStreamingBubble = null;
+let voiceGenerationId = null;
+
+function getOrCreateVoiceStreamingBubble(generationId) {
+    // If generation changed, finalize old bubble and create new one
+    if (voiceGenerationId !== generationId) {
+        voiceStreamingBubble = null;
+        voiceGenerationId = generationId;
+    }
+
+    if (!voiceStreamingBubble) {
+        const div = document.createElement('div');
+        div.className = 'flex justify-start message-enter';
+        div.id = 'voice-streaming-bubble';
+
+        div.innerHTML = `
+            <div class="max-w-2xl px-4 py-3 rounded-2xl border bg-cathedral-assistant border-orange-800/30">
+                <div class="text-xs text-orange-400 mb-1 font-medium">🎙️ PersonaPlex</div>
+                <div class="text-sm whitespace-pre-wrap message-content"></div>
+            </div>
+        `;
+
+        elements.messagesList.appendChild(div);
+        voiceStreamingBubble = div.querySelector('.message-content');
+        scrollToBottom();
+    }
+
+    return voiceStreamingBubble;
+}
+
 function handleConversationMessage(data) {
     switch (data.type) {
+        case 'connecting':
+            Console.info(data.message || 'Connecting to voice service...');
+            state.voiceConnecting = true;
+            updateMicButtonState();
+            break;
         case 'connected':
-            Console.success(`Voice session: ${data.session_id}`);
+            Console.success(`Voice ready: ${data.session_id}`);
+            state.voiceConnecting = false;
+            state.voiceConnected = true;
+            updateMicButtonState();
+            // Only start audio capture once fully connected AND mic is active
+            if (state.micActive && !isRecording) {
+                startAudioCapture();
+            }
+            break;
+
+        case 'text_token':
+            // Streaming text from PersonaPlex - display in chat
+            const bubble = getOrCreateVoiceStreamingBubble(data.generation_id);
+            bubble.textContent = data.buffer || '';
+            scrollToBottom();
             break;
 
         case 'event':
             // Voice event envelope
             const event = data.event;
             if (event.event_type === 'speech_complete') {
-                // Agent finished speaking
+                // Agent finished speaking - finalize bubble
                 Console.info('Agent: ' + (event.payload?.text || '').slice(0, 50) + '...');
+                voiceStreamingBubble = null;  // Next response gets new bubble
             } else if (event.event_type === 'final_transcript') {
                 // User finished speaking
                 Console.info('User: ' + (event.payload?.text || ''));
@@ -1117,6 +1493,8 @@ function handleConversationMessage(data) {
             Console.info(`Interrupt: cancelled ${data.cancelled_generation_id?.slice(0, 8) || 'none'}`);
             // Clear audio queue to stop current playback
             audioQueue = [];
+            isPlayingAudio = false;
+            nextPlaybackTime = 0;
             currentGenerationId = null;
             break;
 
@@ -1136,35 +1514,55 @@ function handleConversationMessage(data) {
     }
 }
 
+// Audio capture rebuffer state (20ms frames = 480 samples at 24kHz)
+const FRAME_SIZE = 480;  // 20ms at 24kHz
+let micBuffer = null;    // Float32 ring buffer
+let micBufferPos = 0;    // Write position in buffer
+
 function startAudioCapture() {
     if (!mediaStream || isRecording) return;
 
     const ctx = initAudioContext();
 
+    // Initialize rebuffer (enough for a few frames)
+    micBuffer = new Float32Array(FRAME_SIZE * 4);
+    micBufferPos = 0;
+
     // Create audio source from microphone
     const source = ctx.createMediaStreamSource(mediaStream);
 
     // Create script processor for raw PCM access
-    // Using 4096 buffer size for ~170ms chunks at 24kHz
-    const processor = ctx.createScriptProcessor(4096, 1, 1);
+    // Using smaller buffer (2048) for more frequent callbacks
+    const processor = ctx.createScriptProcessor(2048, 1, 1);
 
     processor.onaudioprocess = (e) => {
         if (!isRecording || !conversationSocket || conversationSocket.readyState !== WebSocket.OPEN) {
             return;
         }
 
-        // Get PCM data
+        // Get PCM data from browser
         const inputData = e.inputBuffer.getChannelData(0);
 
-        // Convert float32 to int16
-        const int16Data = new Int16Array(inputData.length);
+        // Rebuffer to exactly 20ms frames (480 samples)
         for (let i = 0; i < inputData.length; i++) {
-            const s = Math.max(-1, Math.min(1, inputData[i]));
-            int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-        }
+            micBuffer[micBufferPos++] = inputData[i];
 
-        // Send to server
-        conversationSocket.send(int16Data.buffer);
+            // When we have a complete 20ms frame, send it
+            if (micBufferPos >= FRAME_SIZE) {
+                // Convert float32 to int16
+                const int16Frame = new Int16Array(FRAME_SIZE);
+                for (let j = 0; j < FRAME_SIZE; j++) {
+                    const s = Math.max(-1, Math.min(1, micBuffer[j]));
+                    int16Frame[j] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                }
+
+                // Send exactly 20ms frame to server
+                conversationSocket.send(int16Frame.buffer);
+
+                // Reset buffer (move any overflow to start)
+                micBufferPos = 0;
+            }
+        }
     };
 
     source.connect(processor);
@@ -1173,7 +1571,7 @@ function startAudioCapture() {
     audioRecorder = { source, processor };
     isRecording = true;
 
-    Console.info('Audio capture started');
+    Console.info('Audio capture started (20ms frame rebuffering)');
 }
 
 function stopAudioCapture() {
@@ -1187,6 +1585,10 @@ function stopAudioCapture() {
         mediaStream.getTracks().forEach(track => track.stop());
         mediaStream = null;
     }
+
+    // Reset rebuffer state
+    micBuffer = null;
+    micBufferPos = 0;
 
     isRecording = false;
     Console.info('Audio capture stopped');
@@ -1204,21 +1606,52 @@ function sendSilence() {
     }
 }
 
+/**
+ * Close voice conversation - ensures clean shutdown of all voice resources.
+ * Called when: mic button toggled off, thread switch, voice disabled, page unload.
+ */
 function closeVoiceConversation() {
+    // 1. Stop audio capture first (stops mic streaming)
     stopAudioCapture();
+
+    // 2. Close WebSocket with clean code
     if (conversationSocket) {
-        conversationSocket.close();
+        // Send close signal if socket is open
+        if (conversationSocket.readyState === WebSocket.OPEN) {
+            try {
+                conversationSocket.send(JSON.stringify({ type: 'close' }));
+            } catch (e) {
+                // Ignore send errors during close
+            }
+        }
+        conversationSocket.close(1000, 'User closed');
         conversationSocket = null;
     }
+
+    // 3. Clear all audio state
     audioQueue = [];
     isPlayingAudio = false;
+    nextPlaybackTime = 0;
     currentGenerationId = null;
+
+    // 4. Reset mic state flag
+    state.micActive = false;
 }
 
 // Expose for debugging
 window.initVoiceConversation = initVoiceConversation;
 window.closeVoiceConversation = closeVoiceConversation;
 window.sendInterrupt = sendInterrupt;
+
+// Clean up voice resources on page unload (prevents phantom streams)
+window.addEventListener('beforeunload', () => {
+    if (state.micActive || conversationSocket) {
+        closeVoiceConversation();
+    }
+    if (voiceSocket) {
+        closeVoiceStream();
+    }
+});
 
 // ========== Initialize ==========
 
