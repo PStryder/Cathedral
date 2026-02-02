@@ -13,6 +13,7 @@ from . import (
     ScriptureGate,
     ToolGate,
     MCPClient,
+    VoiceGate,
 )
 from .SecurityManager import SecurityManager
 
@@ -33,4 +34,5 @@ __all__ = [
     "ScriptureGate",
     "ToolGate",
     "MCPClient",
+    "VoiceGate",
 ]

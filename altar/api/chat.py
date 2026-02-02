@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any, Dict
 
@@ -16,6 +17,7 @@ class UserInput(BaseModel):
     enable_tools: bool = False  # Enable ToolGate tool calling
     enabled_gates: list[str] = []  # List of enabled gates (e.g., ["MemoryGate", "ShellGate"])
     enable_context: bool = True  # Enable context injection (RAG/memory context)
+    enable_voice: bool = False  # Enable voice output (TTS)
 
 
 class ThreadRequest(BaseModel):
@@ -25,6 +27,15 @@ class ThreadRequest(BaseModel):
 
 class RenameThreadRequest(BaseModel):
     thread_name: str
+
+
+async def _synthesize_to_queue(text: str, audio_queue, is_final: bool = False):
+    """Helper to synthesize text to audio queue."""
+    try:
+        from cathedral import VoiceGate
+        await VoiceGate.synthesize_to_queue(text, audio_queue, is_final=is_final)
+    except Exception:
+        pass  # Silently fail voice synthesis
 
 
 def create_router(templates, process_input_stream, loom, services) -> APIRouter:
@@ -74,9 +85,25 @@ def create_router(templates, process_input_stream, loom, services) -> APIRouter:
             user_input: User message
             thread_uid: Thread identifier
             enable_tools: Enable ToolGate tool calling (default: False)
+            enable_voice: Enable voice synthesis (default: False)
         """
 
         async def generate():
+            # Voice synthesis components (lazy import to avoid dependency issues)
+            sentence_buffer = None
+            audio_queue = None
+
+            if user_input.enable_voice:
+                try:
+                    from cathedral import VoiceGate
+                    VoiceGate.initialize()
+                    if VoiceGate.is_available():
+                        sentence_buffer = VoiceGate.get_sentence_buffer()
+                        audio_queue = await VoiceGate.get_audio_queue(user_input.thread_uid)
+                except Exception as e:
+                    # Voice not available, continue without it
+                    pass
+
             try:
                 async for token in process_input_stream(
                     user_input.user_input,
@@ -87,6 +114,25 @@ def create_router(templates, process_input_stream, loom, services) -> APIRouter:
                     enable_context=user_input.enable_context,
                 ):
                     yield {"data": json.dumps({"token": token})}
+
+                    # Voice synthesis: buffer tokens and synthesize sentences
+                    if sentence_buffer is not None and audio_queue is not None:
+                        sentence = sentence_buffer.add_token(token)
+                        if sentence:
+                            # Synthesize in background (non-blocking)
+                            asyncio.create_task(
+                                _synthesize_to_queue(sentence, audio_queue, is_final=False)
+                            )
+
+                # Flush remaining text for voice
+                if sentence_buffer is not None and audio_queue is not None:
+                    final_sentence = sentence_buffer.flush()
+                    if final_sentence:
+                        await _synthesize_to_queue(final_sentence, audio_queue, is_final=True)
+                    else:
+                        # Send empty final marker
+                        await audio_queue.enqueue(b"", is_final=True)
+
                 yield {"data": json.dumps({"done": True})}
             except Exception as e:
                 yield {"data": json.dumps({"error": str(e)})}

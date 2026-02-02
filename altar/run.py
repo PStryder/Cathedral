@@ -28,6 +28,7 @@ from altar.api import (
     shell,
     subagent,
     toolgate,
+    voice,
 )
 from altar.lifecycle import startup, shutdown
 from altar.middleware import SecurityMiddleware
@@ -47,6 +48,7 @@ from cathedral import (
     SecurityManager,
     ShellGate,
     SubAgentGate,
+    VoiceGate,
 )
 
 
@@ -130,6 +132,7 @@ app.include_router(memory.create_router(templates, MemoryGate, emit_event))
 app.include_router(subagent.create_router(templates, SubAgentGate, emit_event))
 app.include_router(toolgate.create_router(templates))
 app.include_router(mcp.create_router(templates, MCPClient, emit_event))
+app.include_router(voice.create_router(emit_event))
 
 
 if __name__ == "__main__":

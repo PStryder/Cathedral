@@ -294,6 +294,12 @@
                                     <span class="text-emerald-400">&#129302;</span>
                                     <span class="gate-label">Agents</span>
                                 </label>
+                                <label class="flex items-center gap-1.5 cursor-pointer select-none" title="Voice output (TTS)">
+                                    <input type="checkbox" id="voiceToggle"
+                                           class="w-3.5 h-3.5 rounded border-gray-600 bg-gray-700 text-orange-500 focus:ring-orange-500 focus:ring-offset-0">
+                                    <span class="text-orange-400">&#128266;</span>
+                                    <span id="voiceLabel" class="voice-label">Voice</span>
+                                </label>
                             </div>
                         </div>
                         <span id="streamingStatus" class="hidden">
@@ -333,6 +339,9 @@
         </main>
     </div>
 
-    <script src="/static/app.js?v=20260201d"></script>
+    <!-- Hidden audio element for TTS playback -->
+    <audio id="ttsAudio" style="display:none;"></audio>
+
+    <script src="/static/app.js?v=20260202a"></script>
 </body>
 </html>

@@ -1,0 +1,26 @@
+# Cathedral Docker Compose Override
+# Place this file next to docker-compose.yml and restart
+# Generated: 2026-02-02
+
+services:
+  cathedral:
+    volumes:
+      - "f:/HexyLab:/HexyLab:rw"
+    # GPU access for VoiceGate TTS
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_VISIBLE_DEVICES=0
+      # VoiceGate / PersonaPlex configuration
+      # PersonaPlex provides /api/tts endpoint for text-to-speech
+      # (Opus codec stays in PersonaPlex, Cathedral receives PCM)
+      - TTS_ENABLED=true
+      - TTS_PROVIDER=personaplex
+      - PERSONAPLEX_URL=wss://host.docker.internal:8998
+      - PERSONAPLEX_VOICE=NATF2

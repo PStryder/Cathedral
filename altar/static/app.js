@@ -10,6 +10,8 @@ const state = {
     toolsEnabled: false,
     contextInjectionEnabled: true,  // Context injection (RAG/memory context)
     isEditingThreadName: false,
+    voiceEnabled: false,  // Voice output (TTS)
+    voiceAvailable: false,  // Whether voice is available on server
     // Per-gate enablement
     enabledGates: {
         MemoryGate: false,
@@ -57,7 +59,11 @@ const elements = {
     contextToggle: document.getElementById('contextToggle'),
     contextLabel: document.getElementById('contextLabel'),
     // Thread name editing
-    threadNameInput: document.getElementById('threadNameInput')
+    threadNameInput: document.getElementById('threadNameInput'),
+    // Voice toggle
+    voiceToggle: document.getElementById('voiceToggle'),
+    voiceLabel: document.getElementById('voiceLabel'),
+    ttsAudio: document.getElementById('ttsAudio')
 };
 
 // ========== Thread Management ==========
@@ -392,6 +398,11 @@ async function sendMessage() {
     let fullResponse = '';
     const startTime = Date.now();
 
+    // Initialize voice stream if enabled
+    if (state.voiceEnabled && state.voiceAvailable) {
+        initVoiceStream(state.currentThreadUid);
+    }
+
     try {
         // Use fetch with POST for SSE (EventSource only supports GET)
         // Build list of enabled gates
@@ -408,7 +419,8 @@ async function sendMessage() {
                 thread_uid: state.currentThreadUid,
                 enable_tools: anyToolsEnabled,
                 enabled_gates: enabledGates,
-                enable_context: state.contextInjectionEnabled
+                enable_context: state.contextInjectionEnabled,
+                enable_voice: state.voiceEnabled && state.voiceAvailable
             })
         });
 
@@ -746,6 +758,24 @@ if (elements.contextToggle) {
     });
 }
 
+// Voice toggle
+if (elements.voiceToggle) {
+    elements.voiceToggle.addEventListener('change', (e) => {
+        state.voiceEnabled = e.target.checked;
+        if (elements.voiceLabel) {
+            elements.voiceLabel.className = e.target.checked ? 'voice-label font-medium' : 'voice-label';
+        }
+        Console.info(e.target.checked
+            ? 'Voice output enabled'
+            : 'Voice output disabled');
+
+        // Close voice stream if disabled
+        if (!e.target.checked) {
+            closeVoiceStream();
+        }
+    });
+}
+
 // Thread name editing
 elements.currentThreadName.addEventListener('click', startEditingThreadName);
 elements.threadNameInput.addEventListener('blur', finishEditingThreadName);
@@ -808,6 +838,163 @@ async function finishEditingThreadName() {
     }
 }
 
+// ========== Voice / TTS ==========
+
+// Audio playback state
+let audioContext = null;
+let audioQueue = [];
+let isPlayingAudio = false;
+let voiceSocket = null;
+
+function initAudioContext() {
+    if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)({
+            sampleRate: 24000
+        });
+    }
+    // Resume if suspended (browser policy)
+    if (audioContext.state === 'suspended') {
+        audioContext.resume();
+    }
+    return audioContext;
+}
+
+async function checkVoiceStatus() {
+    try {
+        const res = await fetch('/api/voice/status');
+        if (res.ok) {
+            const status = await res.json();
+            state.voiceAvailable = status.available;
+
+            if (elements.voiceToggle) {
+                elements.voiceToggle.disabled = !status.available;
+                if (!status.available) {
+                    elements.voiceToggle.title = status.error || 'Voice not available';
+                }
+            }
+
+            if (status.available) {
+                Console.info('Voice synthesis available');
+            } else {
+                Console.info(`Voice unavailable: ${status.error || 'TTS disabled'}`);
+            }
+        }
+    } catch (e) {
+        // Voice endpoint may not exist
+        state.voiceAvailable = false;
+    }
+}
+
+function initVoiceStream(threadId) {
+    if (!state.voiceEnabled || !state.voiceAvailable) return;
+
+    // Close existing connection
+    if (voiceSocket) {
+        voiceSocket.close();
+        voiceSocket = null;
+    }
+
+    // Reset audio state
+    audioQueue = [];
+    isPlayingAudio = false;
+
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    voiceSocket = new WebSocket(`${protocol}//${location.host}/api/voice/${threadId}`);
+    voiceSocket.binaryType = 'arraybuffer';
+
+    let currentMetadata = null;
+
+    voiceSocket.onopen = () => {
+        Console.info('Voice stream connected');
+    };
+
+    voiceSocket.onmessage = async (event) => {
+        if (typeof event.data === 'string') {
+            // JSON metadata
+            currentMetadata = JSON.parse(event.data);
+            if (currentMetadata.error) {
+                Console.warning(`Voice error: ${currentMetadata.error}`);
+                return;
+            }
+        } else {
+            // Binary audio data
+            if (event.data.byteLength > 0) {
+                audioQueue.push({
+                    data: event.data,
+                    metadata: currentMetadata
+                });
+
+                if (!isPlayingAudio) {
+                    playNextAudioChunk();
+                }
+            }
+
+            // Check for final chunk
+            if (currentMetadata && currentMetadata.is_final) {
+                Console.info('Voice stream complete');
+            }
+        }
+    };
+
+    voiceSocket.onerror = (error) => {
+        Console.error('Voice stream error');
+    };
+
+    voiceSocket.onclose = () => {
+        Console.info('Voice stream closed');
+        voiceSocket = null;
+    };
+}
+
+async function playNextAudioChunk() {
+    if (audioQueue.length === 0) {
+        isPlayingAudio = false;
+        return;
+    }
+
+    isPlayingAudio = true;
+    const { data, metadata } = audioQueue.shift();
+
+    try {
+        const ctx = initAudioContext();
+
+        // Convert PCM to AudioBuffer
+        // Assuming 16-bit signed PCM, mono, at sample_rate
+        const sampleRate = metadata?.sample_rate || 24000;
+        const int16Array = new Int16Array(data);
+        const float32Array = new Float32Array(int16Array.length);
+
+        // Convert int16 to float32
+        for (let i = 0; i < int16Array.length; i++) {
+            float32Array[i] = int16Array[i] / 32768.0;
+        }
+
+        // Create audio buffer
+        const audioBuffer = ctx.createBuffer(1, float32Array.length, sampleRate);
+        audioBuffer.getChannelData(0).set(float32Array);
+
+        // Play the buffer
+        const source = ctx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(ctx.destination);
+        source.onended = playNextAudioChunk;
+        source.start();
+
+    } catch (e) {
+        Console.error(`Audio playback error: ${e.message}`);
+        playNextAudioChunk(); // Try next chunk
+    }
+}
+
+function closeVoiceStream() {
+    if (voiceSocket) {
+        voiceSocket.close();
+        voiceSocket = null;
+    }
+    audioQueue = [];
+    isPlayingAudio = false;
+}
+
 // ========== Initialize ==========
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -826,6 +1013,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Check security status
     checkSecurityStatus();
+
+    // Check voice availability
+    checkVoiceStatus();
 });
 
 async function checkSecurityStatus() {
