@@ -633,27 +633,28 @@ function connectEventSource() {
         const data = JSON.parse(e.data);
         const msg = data.message || '';
 
-        console.log('[EventSource] Tool event received:', msg);
+        // Debug: show raw message format in Cathedral console
+        Console.info(`[RAW TOOL EVENT] "${msg}"`);
 
-        // Handle structured tool events for inline indicators
-        if (msg.startsWith('TOOL_START:')) {
+        // Handle structured tool events for inline indicators (case-insensitive)
+        const msgUpper = msg.toUpperCase();
+        if (msgUpper.startsWith('TOOL_START:')) {
             const toolName = msg.split(':')[1];
-            Console.tool(`Calling ${toolName}...`);
-            // Always try to show indicator if messagesList is visible
             const listHidden = elements.messagesList?.classList.contains('hidden');
-            console.log(`[Tool] messagesList hidden=${listHidden}, streaming=${state.isStreaming}`);
+            Console.tool(`Calling ${toolName}... [list:${listHidden ? 'hidden' : 'visible'}]`);
             if (elements.messagesList && !listHidden) {
-                appendToolCallIndicator(toolName);
+                const indicator = appendToolCallIndicator(toolName);
+                Console.info(`Tool indicator created: ${indicator ? indicator.id : 'FAILED'}`);
             } else {
-                Console.warning(`Tool indicator skipped: messagesList ${elements.messagesList ? 'hidden' : 'not found'}`);
+                Console.warning(`Tool indicator skipped: messagesList ${elements.messagesList ? 'hidden' : 'missing'}`);
             }
-        } else if (msg.startsWith('TOOL_OK:')) {
+        } else if (msgUpper.startsWith('TOOL_OK:')) {
             const parts = msg.split(':');
             const toolName = parts[1];
             const elapsedMs = parseInt(parts[2]) || 0;
             Console.tool(`${toolName} completed (${elapsedMs}ms)`);
             updateToolCallIndicator(toolName, true, elapsedMs);
-        } else if (msg.startsWith('TOOL_ERROR:')) {
+        } else if (msgUpper.startsWith('TOOL_ERROR:')) {
             const parts = msg.split(':');
             const toolName = parts[1];
             const elapsedMs = parseInt(parts[2]) || 0;
