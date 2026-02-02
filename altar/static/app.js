@@ -445,9 +445,35 @@ async function sendMessage() {
                     try {
                         const data = JSON.parse(line.slice(6));
                         if (data.token) {
-                            fullResponse += data.token;
-                            contentEl.textContent = fullResponse;
-                            scrollToBottom();
+                            // Check for tool markers before adding to display
+                            const token = data.token;
+                            const toolMatch = token.match(/\[\[TOOL:(START|OK|ERROR):([^\]]+)\]\]/g);
+
+                            if (toolMatch) {
+                                // Process each tool marker
+                                for (const marker of toolMatch) {
+                                    const parts = marker.match(/\[\[TOOL:(START|OK|ERROR):([^\]]+)\]\]/);
+                                    if (parts) {
+                                        const [, status, toolName] = parts;
+                                        if (status === 'START') {
+                                            appendToolCallIndicator(toolName);
+                                        } else {
+                                            updateToolCallIndicator(toolName, status === 'OK', 0);
+                                        }
+                                    }
+                                }
+                                // Strip markers from display text
+                                const cleanToken = token.replace(/\[\[TOOL:(START|OK|ERROR):[^\]]+\]\]\n?/g, '');
+                                if (cleanToken) {
+                                    fullResponse += cleanToken;
+                                    contentEl.textContent = fullResponse;
+                                    scrollToBottom();
+                                }
+                            } else {
+                                fullResponse += token;
+                                contentEl.textContent = fullResponse;
+                                scrollToBottom();
+                            }
                             tokenCount++;
                         }
                         if (data.done) {
@@ -632,44 +658,8 @@ function connectEventSource() {
     eventSource.addEventListener('tool', (e) => {
         const data = JSON.parse(e.data);
         const msg = data.message || '';
-
-        // Debug: show raw message format in Cathedral console
-        Console.info(`[RAW TOOL EVENT] "${msg}"`);
-
-        // Handle structured tool events for inline indicators (case-insensitive)
-        const msgUpper = msg.toUpperCase();
-        if (msgUpper.startsWith('TOOL_START:')) {
-            const toolName = msg.split(':')[1];
-            const listHidden = elements.messagesList?.classList.contains('hidden');
-            Console.tool(`Calling ${toolName}... [list:${listHidden ? 'hidden' : 'visible'}]`);
-            if (elements.messagesList && !listHidden) {
-                const indicator = appendToolCallIndicator(toolName);
-                Console.info(`Tool indicator created: ${indicator ? indicator.id : 'FAILED'}`);
-            } else {
-                Console.warning(`Tool indicator skipped: messagesList ${elements.messagesList ? 'hidden' : 'missing'}`);
-            }
-        } else if (msgUpper.startsWith('TOOL_OK:')) {
-            const parts = msg.split(':');
-            const toolName = parts[1];
-            const elapsedMs = parseInt(parts[2]) || 0;
-            Console.tool(`${toolName} completed (${elapsedMs}ms)`);
-            updateToolCallIndicator(toolName, true, elapsedMs);
-        } else if (msgUpper.startsWith('TOOL_ERROR:')) {
-            const parts = msg.split(':');
-            const toolName = parts[1];
-            const elapsedMs = parseInt(parts[2]) || 0;
-            Console.tool(`${toolName} failed (${elapsedMs}ms)`);
-            updateToolCallIndicator(toolName, false, elapsedMs);
-        } else {
-            // Legacy format or other messages
-            Console.tool(msg);
-            if (state.isStreaming && state.toolsEnabled) {
-                if (msg.includes('Malformed')) {
-                    appendToolCallIndicator('JSON Parse Error');
-                    setTimeout(() => updateToolCallIndicator('JSON Parse Error', false, 0), 100);
-                }
-            }
-        }
+        // Just log to console panel - indicators now come through stream
+        Console.tool(msg);
     });
 
     // Ignore ping events (keepalive)

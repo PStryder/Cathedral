@@ -233,10 +233,8 @@ class ToolOrchestrator:
         try:
             import time
             start_time = time.time()
-            await self._emit("tool", f"TOOL_START:{call.tool}")
             result = await _dispatch_tool(tool, call.args)
             elapsed_ms = int((time.time() - start_time) * 1000)
-            await self._emit("tool", f"TOOL_OK:{call.tool}:{elapsed_ms}")
             _log.info(f"Tool {call.tool} executed successfully in {elapsed_ms}ms")
 
             # Convert Pydantic models to dicts for JSON serialization
@@ -369,9 +367,16 @@ class ToolOrchestrator:
             if remaining_text.strip() and is_first_iteration and not initial_already_streamed:
                 yield remaining_text + "\n"
 
-            # Execute tools
-            await self._emit("tool", f"Executing {len(tool_calls)} tool(s)")
+            # Execute tools with inline markers
+            for call in tool_calls:
+                yield f"\n[[TOOL:START:{call.tool}]]\n"
+
             results = await self.execute_batch(tool_calls)
+
+            # Emit completion markers
+            for call, result in zip(tool_calls, results):
+                status = "OK" if result.ok else "ERROR"
+                yield f"[[TOOL:{status}:{call.tool}]]\n"
 
             # Format results for injection
             result_content = format_tool_results(results)
