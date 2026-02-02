@@ -44,6 +44,45 @@ from .models import (
 from .sentence_buffer import SentenceBuffer
 from .audio_queue import AudioQueue, AudioQueueManager, get_queue_manager
 
+# Streaming voice components
+from .events import (
+    VoiceEvent,
+    Channel,
+    CommitLevel,
+    EventType,
+)
+from .speech_queue import (
+    SpeechQueue,
+    SpeechChunk,
+    SpeechQueueManager,
+    get_speech_queue_manager,
+)
+from .opus_codec import (
+    OpusCodec,
+    OpusEncoder,
+    OpusDecoder,
+    is_opus_available,
+    get_codec_info,
+    SAMPLE_RATE as OPUS_SAMPLE_RATE,
+)
+from .voice_bridge import (
+    VoiceBridge,
+    BridgeConfig,
+    create_voice_bridge,
+)
+from .turn_manager import (
+    TurnManager,
+    TurnManagerConfig,
+    TurnState,
+    Turn,
+)
+from .transcript_writer import (
+    TranscriptWriter,
+    TranscriptEntry,
+    TranscriptManager,
+    get_transcript_manager,
+)
+
 _log = GateLogger.get("VoiceGate")
 
 # Module state
@@ -513,4 +552,35 @@ __all__ = [
     "VoicePreset",
     "SentenceBuffer",
     "AudioQueue",
+    # Streaming voice components
+    "VoiceEvent",
+    "Channel",
+    "CommitLevel",
+    "EventType",
+    # Speech queue with cancel tokens
+    "SpeechQueue",
+    "SpeechChunk",
+    "SpeechQueueManager",
+    "get_speech_queue_manager",
+    # Opus codec
+    "OpusCodec",
+    "OpusEncoder",
+    "OpusDecoder",
+    "is_opus_available",
+    "get_codec_info",
+    "OPUS_SAMPLE_RATE",
+    # Voice bridge
+    "VoiceBridge",
+    "BridgeConfig",
+    "create_voice_bridge",
+    # Turn manager
+    "TurnManager",
+    "TurnManagerConfig",
+    "TurnState",
+    "Turn",
+    # Transcript writer
+    "TranscriptWriter",
+    "TranscriptEntry",
+    "TranscriptManager",
+    "get_transcript_manager",
 ]
