@@ -279,6 +279,7 @@ class ToolOrchestrator:
         model: str,
         temperature: float,
         stream_callback: Optional[Callable[[str], None]] = None,
+        initial_already_streamed: bool = False,
     ) -> AsyncGenerator[str, None]:
         """
         Run the tool execution loop.
@@ -296,6 +297,8 @@ class ToolOrchestrator:
             model: Model name for follow-up calls
             temperature: Temperature for follow-up calls
             stream_callback: Optional callback for streaming tokens
+            initial_already_streamed: If True, skip yielding remaining_text from
+                                      initial_response (caller already streamed it)
 
         Yields:
             Response text tokens
@@ -303,6 +306,7 @@ class ToolOrchestrator:
         from cathedral.StarMirror import reflect_stream
 
         current_response = initial_response
+        is_first_iteration = True
 
         while self.budget.can_iterate():
             self.budget.use_iteration()
@@ -358,7 +362,11 @@ class ToolOrchestrator:
                 tool_calls = tool_calls[: self.budget.max_calls_per_step]
 
             # Yield any text before tool calls
-            if remaining_text.strip():
+            # Skip if: (a) initial response already streamed, OR (b) we just streamed
+            # tokens from reflect_stream (which happens on all iterations after first)
+            # After first iteration, tokens are streamed directly, so remaining_text
+            # would duplicate what was already yielded
+            if remaining_text.strip() and is_first_iteration and not initial_already_streamed:
                 yield remaining_text + "\n"
 
             # Execute tools
@@ -390,7 +398,10 @@ class ToolOrchestrator:
                 yield "\n[Tool execution budget exceeded]"
                 break
 
-            # Get next model response
+            # Mark that we've completed first iteration (subsequent responses are fresh)
+            is_first_iteration = False
+
+            # Get next model response and stream tokens immediately
             current_response = ""
             async for token in reflect_stream(
                 messages,
@@ -398,15 +409,12 @@ class ToolOrchestrator:
                 temperature=temperature,
             ):
                 current_response += token
+                yield token  # Stream follow-up tokens immediately
 
-        # Yield any remaining response that wasn't yielded in the loop
-        # This handles cases where:
-        # 1. Loop exited due to can_iterate() returning False
-        # 2. Final response was fetched but not yet parsed/yielded
-        if current_response:
-            remaining, final_calls = parse_tool_calls(current_response)
-            if not final_calls and remaining:
-                yield remaining
+        # Note: We no longer need to yield remaining response here because:
+        # - First iteration: tokens already streamed by caller (initial_already_streamed)
+        # - Subsequent iterations: tokens streamed directly in the loop above
+        # The only content not yet yielded would be tool JSON, which we don't want to show
 
     def get_budget_status(self) -> Dict[str, Any]:
         """Get current budget status."""

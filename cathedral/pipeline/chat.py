@@ -297,6 +297,7 @@ async def process_input_stream(
                 messages=full_history,
                 model=model,
                 temperature=temperature,
+                initial_already_streamed=True,  # We already yielded initial tokens above
             ):
                 yield token
                 tool_output += token  # Accumulate for storage
