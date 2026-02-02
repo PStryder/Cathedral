@@ -629,8 +629,11 @@ function connectEventSource() {
         if (msg.startsWith('TOOL_START:')) {
             const toolName = msg.split(':')[1];
             Console.tool(`Calling ${toolName}...`);
-            if (state.isStreaming) {
+            // Always try to show indicator if messagesList exists
+            if (elements.messagesList && !elements.messagesList.classList.contains('hidden')) {
                 appendToolCallIndicator(toolName);
+            } else {
+                Console.warning(`Tool indicator skipped: messagesList ${elements.messagesList ? 'hidden' : 'not found'}`);
             }
         } else if (msg.startsWith('TOOL_OK:')) {
             const parts = msg.split(':');
