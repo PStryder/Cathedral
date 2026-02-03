@@ -11,7 +11,6 @@ from cathedral.runtime import loom, memory, thread_personalities
 from cathedral.services import ServiceRegistry
 from cathedral.MemoryGate.auto_memory import extract_from_exchange, build_memory_context
 from cathedral.StarMirror import reflect, reflect_stream
-from cathedral.StarMirror.router import backend_handles_tools
 from cathedral import ScriptureGate, PersonalityGate, SecurityManager, ToolGate
 from cathedral.ToolGate import PolicyClass, is_tool_response, get_policy_manager
 
@@ -223,15 +222,10 @@ async def process_input_stream(
     messages = []
 
     # Position 0: Tool Protocol Kernel (if enabled)
-    # Check if backend handles tools internally (e.g., openclaw_agent)
-    # If so, skip Cathedral's ToolGate - the backend runs its own tool loop
-    backend_has_tools = backend_handles_tools()
-    use_cathedral_tools = enable_tools and not backend_has_tools
-
     # Determine which policies are actually enabled (not just requested)
-    active_policies = _get_enabled_policies() if use_cathedral_tools else set()
+    active_policies = _get_enabled_policies() if enable_tools else set()
 
-    if use_cathedral_tools:
+    if enable_tools:
         ToolGate.initialize()
         tool_prompt = ToolGate.build_tool_prompt(
             enabled_policies=active_policies,
@@ -275,7 +269,7 @@ async def process_input_stream(
     model = personality.llm_config.model
     temperature = personality.llm_config.temperature
 
-    if use_cathedral_tools:
+    if enable_tools:
         # Tool mode: stream tokens while accumulating to check for tool calls
         full_response = ""
         async for token in reflect_stream(full_history, model=model, temperature=temperature):
@@ -317,15 +311,6 @@ async def process_input_stream(
             full_response = tool_output if tool_output else full_response
 
         # If no tool calls, we've already streamed the response above
-
-    elif backend_has_tools and enable_tools:
-        # Backend handles tools internally (e.g., openclaw_agent)
-        # Stream directly - Cathedral injects context, backend runs tools
-        await _emit(services, "system", f"Using {backend_handles_tools.__module__.split('.')[-1]} for tool execution")
-        full_response = ""
-        async for token in reflect_stream(full_history, model=model, temperature=temperature):
-            full_response += token
-            yield token
 
     else:
         # Standard mode: stream directly

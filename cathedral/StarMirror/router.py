@@ -11,7 +11,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 from cathedral import Config
 
 
-SUPPORTED_BACKENDS = ("openrouter", "concentrate", "claude_cli", "codex_cli", "openclaw", "openclaw_agent")
+SUPPORTED_BACKENDS = ("openrouter", "concentrate", "claude_cli", "codex_cli", "openclaw")
 _provider_cache: Dict[str, Any] = {}
 _last_backend: Optional[str] = None
 
@@ -28,22 +28,6 @@ def get_backend() -> str:
             f"Choose one of: {', '.join(SUPPORTED_BACKENDS)}."
         )
     return backend
-
-
-def backend_handles_tools() -> bool:
-    """
-    Check if the current backend handles tool execution internally.
-
-    Some backends (like openclaw_agent) run their own tool loops.
-    When this returns True, Cathedral should skip ToolGate orchestration
-    to avoid "double tool loops".
-
-    Returns:
-        True if backend handles tools internally (skip Cathedral ToolGate)
-        False if Cathedral should run ToolGate orchestration
-    """
-    provider = _get_provider()
-    return getattr(provider, "HANDLES_TOOLS_INTERNALLY", False)
 
 
 def _load_provider(backend: str):
@@ -190,7 +174,6 @@ async def transmit_with_audio(
 __all__ = [
     "SUPPORTED_BACKENDS",
     "get_backend",
-    "backend_handles_tools",
     "stream",
     "transmit",
     "transmit_async",
