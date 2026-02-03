@@ -551,7 +551,7 @@ Cathedral/
 ├── cathedral/                # Core subsystems
 │   ├── StarMirror/           # LLM interface
 │   │   ├── router.py         # Multi-backend routing
-│   │   └── providers/        # OpenRouter, Claude CLI, Codex
+│   │   └── providers/        # OpenRouter, OpenClaw, Claude CLI, Codex
 │   ├── MemoryGate/           # Knowledge system
 │   │   ├── conversation/     # Loom conversation memory
 │   │   └── discovery.py      # Knowledge discovery
@@ -630,7 +630,7 @@ Cathedral/
 | **Backend** | FastAPI 0.115+ / Uvicorn |
 | **Database** | PostgreSQL 15+ with pgvector (or SQLite + FAISS) |
 | **ORM** | SQLAlchemy 2.0 (async) |
-| **LLM API** | OpenRouter (40+ models) |
+| **LLM API** | OpenRouter (40+ models) / OpenClaw Gateway |
 | **Local LLM** | llama-cpp-python (TinyLlama 1.1B for summarization) |
 | **Embeddings** | OpenAI text-embedding-3-small (1536 dim) |
 | **Encryption** | AES-256-GCM + Argon2id (via cryptography lib) |
