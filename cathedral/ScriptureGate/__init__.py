@@ -705,6 +705,186 @@ async def build_context(
     return "\n".join(lines)
 
 
+# ==================== OpenClaw Workspace Integration ====================
+
+# Environment configuration for OpenClaw workspace
+OPENCLAW_WORKSPACE_PATHS = os.getenv("OPENCLAW_WORKSPACE_PATHS", "").split(",")
+OPENCLAW_WORKSPACE_PATHS = [p.strip() for p in OPENCLAW_WORKSPACE_PATHS if p.strip()]
+
+SCRIPTURE_OPENCLAW_ENABLED = os.getenv("SCRIPTURE_OPENCLAW_ENABLED", "false").lower() in ("true", "1", "yes")
+
+# Allowlist of file patterns for OpenClaw import (security: avoid secrets/configs)
+OPENCLAW_FILE_ALLOWLIST = {
+    "MEMORY.md", "memory.md",
+    "TOOLS.md", "tools.md",
+    "CONTEXT.md", "context.md",
+    "SESSION.md", "session.md",
+    "*.md",  # Markdown files
+    "*.txt",  # Text files
+}
+
+# Patterns to explicitly skip (security)
+OPENCLAW_FILE_BLOCKLIST = {
+    ".env", "*.env", ".env.*",
+    "*.key", "*.pem", "*.crt",
+    "config.json", "settings.json",
+    "credentials*", "secrets*",
+    ".git/*", ".git",
+}
+
+
+def _matches_pattern(filename: str, pattern: str) -> bool:
+    """Check if filename matches a glob-like pattern."""
+    import fnmatch
+    return fnmatch.fnmatch(filename.lower(), pattern.lower())
+
+
+def _is_allowed_openclaw_file(filepath: Path) -> bool:
+    """Check if a file is allowed for OpenClaw import."""
+    filename = filepath.name
+
+    # Check blocklist first
+    for blocked in OPENCLAW_FILE_BLOCKLIST:
+        if _matches_pattern(filename, blocked):
+            return False
+        if _matches_pattern(str(filepath), blocked):
+            return False
+
+    # Check allowlist
+    for allowed in OPENCLAW_FILE_ALLOWLIST:
+        if _matches_pattern(filename, allowed):
+            return True
+
+    return False
+
+
+async def import_openclaw_workspace(
+    workspace_path: str = None,
+    force_refresh: bool = False,
+) -> Dict:
+    """
+    Import documents from OpenClaw workspace into ScriptureGate.
+
+    Files are imported as read-only references with source="openclaw".
+    Only files matching OPENCLAW_FILE_ALLOWLIST are imported (security).
+
+    Args:
+        workspace_path: Path to OpenClaw workspace (uses OPENCLAW_WORKSPACE_PATHS if None)
+        force_refresh: Re-import even if files already exist
+
+    Returns:
+        Dict with import statistics
+
+    Environment variables:
+        OPENCLAW_WORKSPACE_PATHS: Comma-separated paths to scan
+        SCRIPTURE_OPENCLAW_ENABLED: Enable/disable OpenClaw import (default: false)
+    """
+    if not SCRIPTURE_OPENCLAW_ENABLED and workspace_path is None:
+        return {"status": "disabled", "message": "Set SCRIPTURE_OPENCLAW_ENABLED=true to enable"}
+
+    _ensure_tables()
+
+    paths_to_scan = []
+    if workspace_path:
+        paths_to_scan = [Path(workspace_path)]
+    else:
+        paths_to_scan = [Path(p) for p in OPENCLAW_WORKSPACE_PATHS]
+
+    imported = 0
+    skipped = 0
+    errors = []
+
+    for root_path in paths_to_scan:
+        if not root_path.exists():
+            errors.append(f"Path not found: {root_path}")
+            continue
+
+        if not root_path.is_dir():
+            # Single file
+            files = [root_path]
+        else:
+            # Scan directory
+            files = list(root_path.rglob("*"))
+
+        for filepath in files:
+            if not filepath.is_file():
+                continue
+
+            if not _is_allowed_openclaw_file(filepath):
+                skipped += 1
+                continue
+
+            # Check if already imported (by source_ref)
+            source_ref = str(filepath.resolve())
+            existing = None
+            with get_session() as session:
+                existing = session.execute(
+                    select(Scripture).where(
+                        Scripture.source_ref == source_ref,
+                        Scripture.source == "openclaw",
+                        Scripture.is_deleted.is_(False),
+                    )
+                ).scalar_one_or_none()
+
+            if existing and not force_refresh:
+                skipped += 1
+                continue
+
+            # Import the file
+            try:
+                title = filepath.stem
+                if filepath.name in ("MEMORY.md", "memory.md"):
+                    title = f"OpenClaw Memory - {filepath.parent.name}"
+                elif filepath.name in ("TOOLS.md", "tools.md"):
+                    title = f"OpenClaw Tools - {filepath.parent.name}"
+
+                await store(
+                    source=filepath,
+                    title=title,
+                    description=f"Imported from OpenClaw workspace: {filepath.relative_to(root_path) if root_path.is_dir() else filepath.name}",
+                    tags=["openclaw", "workspace", filepath.suffix.lstrip(".")],
+                    source_type="openclaw",
+                    source_ref=source_ref,
+                    auto_index=True,
+                )
+                imported += 1
+                _log.info(f"Imported OpenClaw file: {filepath.name}")
+
+            except Exception as e:
+                errors.append(f"Failed to import {filepath}: {e}")
+
+    return {
+        "status": "completed",
+        "imported": imported,
+        "skipped": skipped,
+        "errors": errors if errors else None,
+        "paths_scanned": [str(p) for p in paths_to_scan],
+    }
+
+
+def list_openclaw_scriptures(limit: int = 50) -> List[Dict]:
+    """List all scriptures imported from OpenClaw workspace."""
+    _ensure_tables()
+
+    with get_session() as session:
+        results = session.execute(
+            select(Scripture)
+            .where(
+                Scripture.source == "openclaw",
+                Scripture.is_deleted.is_(False),
+            )
+            .order_by(Scripture.created_at.desc())
+            .limit(limit)
+        ).scalars().all()
+
+        return [s.to_dict() for s in results]
+
+
+async def refresh_openclaw_workspace() -> Dict:
+    """Re-scan and update OpenClaw workspace documents."""
+    return await import_openclaw_workspace(force_refresh=True)
+
+
 # ==================== Legacy Compatibility ====================
 
 # These maintain compatibility with the old ScriptureGate API
@@ -924,6 +1104,12 @@ __all__ = [
     "build_context",
     # Stats
     "stats",
+    # OpenClaw workspace integration
+    "import_openclaw_workspace",
+    "list_openclaw_scriptures",
+    "refresh_openclaw_workspace",
+    "OPENCLAW_WORKSPACE_PATHS",
+    "SCRIPTURE_OPENCLAW_ENABLED",
     # Legacy
     "export_thread",
     "import_bios",
