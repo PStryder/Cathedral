@@ -11,7 +11,7 @@ from cathedral.runtime import loom, memory, thread_personalities
 from cathedral.services import ServiceRegistry
 from cathedral.MemoryGate.auto_memory import extract_from_exchange, build_memory_context
 from cathedral.StarMirror import reflect, reflect_stream
-from cathedral import ScriptureGate, PersonalityGate, SecurityManager, ToolGate
+from cathedral import ScriptureGate, PersonalityGate, SecurityManager, ToolGate, VolitionGate
 from cathedral.ToolGate import PolicyClass, is_tool_response, get_policy_manager
 
 
@@ -163,6 +163,61 @@ async def process_input_stream(
             yield token
         return
 
+    # Run pipeline turns iteratively (supports volition continuation)
+    current_input = user_input
+    while True:
+        full_response = ""
+        async for token in _run_pipeline_turn(
+            current_input, thread_uid, services,
+            enable_tools, enabled_gates, enable_context,
+        ):
+            full_response += token
+            yield token
+
+        # === VOLITION CONTINUATION CHECK ===
+        # If the response contains a volition_continue tool call, loop
+        # back for another turn. Iterative — no recursion / stack growth.
+        if not (enable_tools and _contains_volition_continue(full_response)):
+            break
+
+        continuation = _extract_volition_continue(full_response)
+        if not continuation:
+            break
+
+        text = continuation.get("text", "")
+        reason = continuation.get("reason", "")
+
+        result = VolitionGate.request_continue(text, reason)
+        if result["status"] != "approved":
+            await _emit(
+                services,
+                "volition",
+                f"Continuation denied: {result.get('error_code', 'unknown')}",
+            )
+            break
+
+        await _emit(
+            services,
+            "volition",
+            f"Autonomous continuation (turn {result['turn_count']}/{result['turn_limit']})",
+        )
+        current_input = text
+        # loop continues with new input
+
+
+async def _run_pipeline_turn(
+    user_input: str,
+    thread_uid: str,
+    services: ServiceRegistry,
+    enable_tools: bool,
+    enabled_gates: list[str] | None,
+    enable_context: bool,
+) -> AsyncGenerator[str, None]:
+    """Execute a single pipeline turn (context assembly -> LLM -> tool loop -> store).
+
+    This is the core pipeline logic extracted so process_input_stream can call it
+    iteratively for volition continuations without recursion.
+    """
     # Load personality for this thread
     PersonalityGate.initialize()
     personality_id = thread_personalities.get(thread_uid, "default")
@@ -199,7 +254,6 @@ async def process_input_stream(
     # ==========================================================================
 
     # Build prior conversation history (BEFORE appending current message)
-    # This gives us positions 5+ (continuity layer)
     prior_history = await loom.compose_prompt_context_async(user_input, thread_uid)
 
     # Now append current user message to storage (for future turns)
@@ -209,7 +263,6 @@ async def process_input_stream(
     memory_context = None
     scripture_context = None
     if enable_context:
-        # Run sync memory search in executor to avoid greenlet errors
         loop = asyncio.get_running_loop()
         memory_context = await loop.run_in_executor(
             None,
@@ -218,11 +271,9 @@ async def process_input_stream(
         scripture_context = await ScriptureGate.build_context(user_input, limit=2, min_similarity=0.4)
 
     # === ASSEMBLE IN CHRONOLOGICAL ORDER ===
-    # LLMs expect: system prompts -> conversation history -> current message
     messages = []
 
     # Position 0: Tool Protocol Kernel (if enabled)
-    # Determine which policies are actually enabled (not just requested)
     active_policies = _get_enabled_policies() if enable_tools else set()
 
     if enable_tools:
@@ -241,7 +292,7 @@ async def process_input_stream(
     system_prompt = personality.get_system_prompt()
     messages.append({"role": "system", "content": system_prompt})
 
-    # Position 2: Scripture / RAG Context (labeled, lower priority background docs)
+    # Position 2: Scripture / RAG Context
     if scripture_context:
         await _emit(services, "system", "RAG context loaded")
         messages.append({
@@ -249,7 +300,7 @@ async def process_input_stream(
             "content": f"[Relevant Documents]\n{scripture_context}"
         })
 
-    # Position 3: Memory Context (labeled, higher priority than RAG)
+    # Position 3: Memory Context
     if memory_context:
         await _emit(services, "memory", "Injecting relevant memories")
         messages.append({
@@ -257,10 +308,10 @@ async def process_input_stream(
             "content": f"[Memory Context]\n{memory_context}"
         })
 
-    # Position 4+: Prior History (conversation continuity - chronological)
+    # Position 4+: Prior History
     messages.extend(prior_history)
 
-    # Position LAST: Current User Message (what we're responding to)
+    # Position LAST: Current User Message
     messages.append({"role": "user", "content": user_input})
 
     full_history = messages
@@ -270,21 +321,17 @@ async def process_input_stream(
     temperature = personality.llm_config.temperature
 
     if enable_tools:
-        # Tool mode: stream tokens while accumulating to check for tool calls
         full_response = ""
         async for token in reflect_stream(full_history, model=model, temperature=temperature):
             full_response += token
-            yield token  # Stream tokens immediately
+            yield token
 
-        # Check if response contains tool calls
         if is_tool_response(full_response):
             await _emit(services, "tool", "Processing tool calls")
 
-            # Create orchestrator with event emission
             async def emit_wrapper(event_type: str, message: str, **kwargs):
                 await _emit(services, event_type, message, **kwargs)
 
-            # Budget limits from config (defaults increased for complex tasks)
             from cathedral import Config
             max_iters = int(Config.get("TOOL_MAX_ITERATIONS", 15))
             max_calls = int(Config.get("TOOL_MAX_CALLS_PER_STEP", 10))
@@ -297,35 +344,65 @@ async def process_input_stream(
                 max_calls_per_step=max_calls,
             )
 
-            # Run tool loop and yield tokens
             tool_output = ""
             async for token in orchestrator.execute_loop(
                 initial_response=full_response,
                 messages=full_history,
                 model=model,
                 temperature=temperature,
-                initial_already_streamed=True,  # We already yielded initial tokens above
+                initial_already_streamed=True,
             ):
                 yield token
-                tool_output += token  # Accumulate for storage
+                tool_output += token
             full_response = tool_output if tool_output else full_response
 
-        # If no tool calls, we've already streamed the response above
-
     else:
-        # Standard mode: stream directly
         full_response = ""
         async for token in reflect_stream(full_history, model=model, temperature=temperature):
             full_response += token
             yield token
 
-    # Store complete assistant response in conversation history (async with embedding)
+    # Store assistant response
     await loom.append_async("assistant", full_response, thread_uid=thread_uid)
 
-    # Extract and store memory from this exchange
+    # Extract memory
     memory_result = extract_from_exchange(user_input, full_response, thread_uid)
     if memory_result:
         await _emit(services, "memory", "Memory extracted from exchange")
+
+
+def _contains_volition_continue(response: str) -> bool:
+    """Check if a response contains a VolitionGate.request_continue tool call."""
+    return "VolitionGate.request_continue" in response
+
+
+def _extract_volition_continue(response: str) -> dict | None:
+    """Extract the volition_continue args from a tool call in the response."""
+    import json
+
+    # Find all JSON-like objects in the response by tracking brace depth
+    i = 0
+    while i < len(response):
+        if response[i] == '{':
+            depth = 0
+            start = i
+            for j in range(i, len(response)):
+                if response[j] == '{':
+                    depth += 1
+                elif response[j] == '}':
+                    depth -= 1
+                    if depth == 0:
+                        candidate = response[start:j + 1]
+                        try:
+                            obj = json.loads(candidate)
+                            if obj.get("tool") == "VolitionGate.request_continue":
+                                return obj.get("args", {})
+                        except json.JSONDecodeError:
+                            pass
+                        break
+        i += 1
+
+    return None
 
 
 __all__ = ["process_input", "process_input_stream"]

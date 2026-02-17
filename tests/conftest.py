@@ -206,6 +206,43 @@ def reset_module_state():
     except (ImportError, AttributeError):
         pass
 
+    # Reset AgencyGate
+    try:
+        import cathedral.AgencyGate as agency_gate
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop and loop.is_running():
+            loop.create_task(agency_gate._reset())
+        else:
+            asyncio.run(agency_gate._reset())
+    except (ImportError, AttributeError, RuntimeError):
+        pass
+
+    # Reset VolitionGate
+    try:
+        import cathedral.VolitionGate as volition_gate
+        volition_gate._reset()
+    except (ImportError, AttributeError):
+        pass
+
+    # Reset PerceptionGate
+    try:
+        import cathedral.PerceptionGate as perception_gate
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop and loop.is_running():
+            loop.create_task(perception_gate._reset())
+        else:
+            asyncio.run(perception_gate._reset())
+    except (ImportError, AttributeError, RuntimeError):
+        pass
+
 
 # Skip markers for tests requiring external services
 requires_network = pytest.mark.skipif(

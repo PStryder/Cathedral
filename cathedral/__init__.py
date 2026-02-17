@@ -14,6 +14,9 @@ from . import (
     ToolGate,
     MCPClient,
     VoiceGate,
+    AgencyGate,
+    VolitionGate,
+    PerceptionGate,
 )
 from .SecurityManager import SecurityManager
 
@@ -35,4 +38,7 @@ __all__ = [
     "ToolGate",
     "MCPClient",
     "VoiceGate",
+    "AgencyGate",
+    "VolitionGate",
+    "PerceptionGate",
 ]

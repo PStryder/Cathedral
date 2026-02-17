@@ -12,6 +12,9 @@ from cathedral import (
     ToolGate,
     MCPClient,
     Config,
+    AgencyGate,
+    VolitionGate,
+    PerceptionGate,
 )
 from cathedral.shared import db_service
 from cathedral.shared.gate import GateLogger
@@ -48,6 +51,12 @@ async def startup(emit_event):
     ToolGate.initialize()
     MCPClient.initialize()
     # SubAgentGate initializes lazily via get_manager()
+
+    # Faculta Gates (AgencyGate -> VolitionGate -> PerceptionGate)
+    AgencyGate.initialize()
+    VolitionGate.initialize()
+    PerceptionGate.initialize(publish_fn=emit_event)
+    _log.info("Faculta gates initialized (AgencyGate, VolitionGate, PerceptionGate)")
 
     # Connect MCP servers with auto_connect enabled
     try:
@@ -108,6 +117,14 @@ async def startup(emit_event):
 
 async def shutdown():
     """Cleanup on server shutdown."""
+    # Shutdown Faculta gates
+    try:
+        await PerceptionGate.shutdown()
+        await AgencyGate.close_all()
+        _log.info("Faculta gates shut down")
+    except Exception as e:
+        _log.error(f"Faculta shutdown error: {e}")
+
     # Disconnect MCP servers
     try:
         await MCPClient.disconnect_all()

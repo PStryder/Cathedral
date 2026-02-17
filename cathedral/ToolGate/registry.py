@@ -361,6 +361,143 @@ BROWSERGATE_TOOLS: List[Dict[str, Any]] = [
     },
 ]
 
+# AgencyGate tools
+AGENCYGATE_TOOLS: List[Dict[str, Any]] = [
+    {
+        "method": "get_info",
+        "description": "Get comprehensive documentation for AgencyGate including all tools and persistent session management",
+        "policy": PolicyClass.READ_ONLY,
+        "is_async": False,
+        "args": {},
+    },
+    {
+        "method": "spawn",
+        "description": "Spawn a new persistent shell session that maintains state across commands",
+        "policy": PolicyClass.PRIVILEGED,
+        "is_async": True,
+        "args": {
+            "session_id": ArgSchema(type="string", description="Unique session ID (auto-generated if omitted)", required=False),
+            "shell": ArgSchema(type="string", description="Shell binary (auto-detected if omitted)", required=False),
+            "cwd": ArgSchema(type="string", description="Working directory", required=False),
+        },
+    },
+    {
+        "method": "exec",
+        "description": "Execute a command in a persistent shell session (state persists between calls)",
+        "policy": PolicyClass.PRIVILEGED,
+        "is_async": True,
+        "args": {
+            "session_id": ArgSchema(type="string", description="Session to execute in", required=True),
+            "command": ArgSchema(type="string", description="Command to execute", required=True),
+            "timeout_ms": ArgSchema(type="integer", description="Timeout in milliseconds", required=False, default=30000),
+        },
+    },
+    {
+        "method": "list_sessions",
+        "description": "List all active persistent shell sessions",
+        "policy": PolicyClass.READ_ONLY,
+        "is_async": False,
+        "args": {},
+    },
+    {
+        "method": "close",
+        "description": "Close a persistent shell session",
+        "policy": PolicyClass.PRIVILEGED,
+        "is_async": True,
+        "args": {
+            "session_id": ArgSchema(type="string", description="Session to close", required=True),
+        },
+    },
+]
+
+# VolitionGate tools
+VOLITIONGATE_TOOLS: List[Dict[str, Any]] = [
+    {
+        "method": "get_info",
+        "description": "Get comprehensive documentation for VolitionGate including self-continuation capabilities and guardrails",
+        "policy": PolicyClass.READ_ONLY,
+        "is_async": False,
+        "args": {},
+    },
+    {
+        "method": "request_continue",
+        "description": "Request an autonomous continuation turn. The agent calls this to continue processing without waiting for user input.",
+        "policy": PolicyClass.PRIVILEGED,
+        "is_async": False,
+        "args": {
+            "text": ArgSchema(type="string", description="Continuation instruction — what to do next", required=True),
+            "reason": ArgSchema(type="string", description="Why this continuation is needed (audit trail)", required=False),
+        },
+    },
+    {
+        "method": "get_status",
+        "description": "Get current volition session state including turn count, limits, and recent prompts",
+        "policy": PolicyClass.READ_ONLY,
+        "is_async": False,
+        "args": {},
+    },
+]
+
+# PerceptionGate tools
+PERCEPTIONGATE_TOOLS: List[Dict[str, Any]] = [
+    {
+        "method": "get_info",
+        "description": "Get comprehensive documentation for PerceptionGate including plugin types and event system",
+        "policy": PolicyClass.READ_ONLY,
+        "is_async": False,
+        "args": {},
+    },
+    {
+        "method": "watch",
+        "description": "Register a new event watcher (file changes, cron schedule, or process monitoring)",
+        "policy": PolicyClass.WRITE,
+        "is_async": True,
+        "args": {
+            "watcher_id": ArgSchema(type="string", description="Unique watcher ID", required=True),
+            "plugin_type": ArgSchema(
+                type="string",
+                description="Plugin type",
+                required=True,
+                enum=["file_watcher", "schedule_watcher", "process_watcher"],
+            ),
+            "config": ArgSchema(type="object", description="Plugin-specific configuration", required=True),
+            "prompt_template": ArgSchema(
+                type="string",
+                description="Template for event prompts. Use {event.summary}, {event.event_type}, {event.details}",
+                required=False,
+                default="Event detected: {event.summary}. Review and decide if action needed.",
+            ),
+        },
+    },
+    {
+        "method": "unwatch",
+        "description": "Remove an active event watcher",
+        "policy": PolicyClass.WRITE,
+        "is_async": True,
+        "args": {
+            "watcher_id": ArgSchema(type="string", description="Watcher to remove", required=True),
+        },
+    },
+    {
+        "method": "list_watchers",
+        "description": "List all active event watchers with stats",
+        "policy": PolicyClass.READ_ONLY,
+        "is_async": False,
+        "args": {},
+    },
+    {
+        "method": "check_events",
+        "description": "Poll recent events from the event buffer",
+        "policy": PolicyClass.READ_ONLY,
+        "is_async": False,
+        "args": {
+            "since": ArgSchema(type="string", description="ISO timestamp — only events after this", required=False),
+            "watcher_id": ArgSchema(type="string", description="Filter by watcher", required=False),
+            "limit": ArgSchema(type="integer", description="Max events to return", required=False, default=20),
+        },
+    },
+]
+
 # ToolGate tools (meta-documentation)
 TOOLGATE_TOOLS: List[Dict[str, Any]] = [
     {
@@ -479,6 +616,9 @@ class ToolRegistry:
         cls._register_gate_tools("ScriptureGate", SCRIPTUREGATE_TOOLS)
         cls._register_gate_tools("BrowserGate", BROWSERGATE_TOOLS)
         cls._register_gate_tools("SubAgentGate", SUBAGENTGATE_TOOLS)
+        cls._register_gate_tools("AgencyGate", AGENCYGATE_TOOLS)
+        cls._register_gate_tools("VolitionGate", VOLITIONGATE_TOOLS)
+        cls._register_gate_tools("PerceptionGate", PERCEPTIONGATE_TOOLS)
 
         cls._initialized = True
         _log.info(f"Tool registry initialized with {len(cls._tools)} tools")
@@ -710,4 +850,7 @@ __all__ = [
     "SCRIPTUREGATE_TOOLS",
     "BROWSERGATE_TOOLS",
     "SUBAGENTGATE_TOOLS",
+    "AGENCYGATE_TOOLS",
+    "VOLITIONGATE_TOOLS",
+    "PERCEPTIONGATE_TOOLS",
 ]

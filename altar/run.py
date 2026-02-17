@@ -29,6 +29,9 @@ from altar.api import (
     subagent,
     toolgate,
     voice,
+    agency,
+    volition,
+    perception,
 )
 from altar.lifecycle import startup, shutdown
 from altar.middleware import SecurityMiddleware
@@ -38,16 +41,19 @@ from cathedral.pipeline import process_input_stream
 from cathedral.runtime import loom
 from cathedral.services import ServiceRegistry
 from cathedral import (
+    AgencyGate,
     BrowserGate,
     Config,
     FileSystemGate,
     MCPClient,
     MemoryGate,
+    PerceptionGate,
     PersonalityGate,
     ScriptureGate,
     SecurityManager,
     ShellGate,
     SubAgentGate,
+    VolitionGate,
     VoiceGate,
 )
 
@@ -133,6 +139,9 @@ app.include_router(subagent.create_router(templates, SubAgentGate, emit_event))
 app.include_router(toolgate.create_router(templates))
 app.include_router(mcp.create_router(templates, MCPClient, emit_event))
 app.include_router(voice.create_router(emit_event))
+app.include_router(agency.create_router(AgencyGate, emit_event))
+app.include_router(volition.create_router(VolitionGate, emit_event))
+app.include_router(perception.create_router(PerceptionGate, emit_event))
 
 
 if __name__ == "__main__":
