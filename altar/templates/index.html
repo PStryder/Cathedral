@@ -234,7 +234,7 @@
 
             <!-- Input Area -->
             <div class="border-t border-cathedral-border p-4">
-                <div class="max-w-4xl mx-auto">
+                <div class="w-full">
                     <div class="relative">
                         <textarea id="messageInput"
                                   placeholder="Type a message... (Shift+Enter for newline)"
@@ -257,11 +257,8 @@
                             </svg>
                         </button>
                     </div>
-                    <div class="flex justify-between items-center mt-2 text-xs text-cathedral-muted">
-                        <div class="flex items-center gap-4">
-                            <span>Commands: /search, /remember, /lock, /spawn</span>
-                            <!-- Gate Toggles -->
-                            <div class="flex items-center gap-3">
+                    <div class="flex items-center mt-2 text-xs text-cathedral-muted">
+                        <div class="flex items-center gap-3">
                                 <label class="flex items-center gap-1.5 cursor-pointer select-none" title="Context injection (RAG/memory context in prompts)">
                                     <input type="checkbox" id="contextToggle" checked
                                            class="w-3.5 h-3.5 rounded border-gray-600 bg-gray-700 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-0">
@@ -304,6 +301,24 @@
                                     <span class="text-emerald-400">&#129302;</span>
                                     <span class="gate-label">Agents</span>
                                 </label>
+                                <label class="flex items-center gap-1.5 cursor-pointer select-none" title="Persistent shell sessions (spawn, exec, close)">
+                                    <input type="checkbox" id="gateAgency" data-gate="AgencyGate"
+                                           class="w-3.5 h-3.5 rounded border-gray-600 bg-gray-700 text-amber-500 focus:ring-amber-500 focus:ring-offset-0">
+                                    <span class="text-amber-400">&#9881;</span>
+                                    <span class="gate-label">Agency</span>
+                                </label>
+                                <label class="flex items-center gap-1.5 cursor-pointer select-none" title="Autonomous continuation (volition loop)">
+                                    <input type="checkbox" id="gateVolition" data-gate="VolitionGate"
+                                           class="w-3.5 h-3.5 rounded border-gray-600 bg-gray-700 text-rose-500 focus:ring-rose-500 focus:ring-offset-0">
+                                    <span class="text-rose-400">&#9889;</span>
+                                    <span class="gate-label">Volition</span>
+                                </label>
+                                <label class="flex items-center gap-1.5 cursor-pointer select-none" title="Event watchers (file, schedule, process)">
+                                    <input type="checkbox" id="gatePerception" data-gate="PerceptionGate"
+                                           class="w-3.5 h-3.5 rounded border-gray-600 bg-gray-700 text-teal-500 focus:ring-teal-500 focus:ring-offset-0">
+                                    <span class="text-teal-400">&#128301;</span>
+                                    <span class="gate-label">Perception</span>
+                                </label>
                                 <label class="flex items-center gap-1.5 cursor-pointer select-none" title="Voice output (TTS)">
                                     <input type="checkbox" id="voiceToggle"
                                            class="w-3.5 h-3.5 rounded border-gray-600 bg-gray-700 text-orange-500 focus:ring-orange-500 focus:ring-offset-0">
@@ -317,7 +332,6 @@
                                     <span id="micIcon">&#127908;</span>
                                     <span id="micLabel">Mic</span>
                                 </button>
-                            </div>
                         </div>
                         <span id="streamingStatus" class="hidden">
                             <span class="inline-flex gap-1">
@@ -359,6 +373,6 @@
     <!-- Hidden audio element for TTS playback -->
     <audio id="ttsAudio" style="display:none;"></audio>
 
-    <script src="/static/app.js?v=20260202c"></script>
+    <script src="/static/app.js?v=20260217a"></script>
 </body>
 </html>

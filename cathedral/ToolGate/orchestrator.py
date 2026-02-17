@@ -88,6 +88,15 @@ def _get_gate_module(gate_name: str):
     elif gate_name == "SubAgentGate":
         from cathedral import SubAgentGate
         return SubAgentGate
+    elif gate_name == "AgencyGate":
+        from cathedral import AgencyGate
+        return AgencyGate
+    elif gate_name == "VolitionGate":
+        from cathedral import VolitionGate
+        return VolitionGate
+    elif gate_name == "PerceptionGate":
+        from cathedral import PerceptionGate
+        return PerceptionGate
     elif gate_name == "MCPClient":
         from cathedral import MCPClient
         return MCPClient

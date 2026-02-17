@@ -22,7 +22,10 @@ const state = {
         FileSystemGate: false,
         ShellGate: false,
         BrowserGate: false,
-        SubAgentGate: false
+        SubAgentGate: false,
+        AgencyGate: false,
+        VolitionGate: false,
+        PerceptionGate: false
     }
 };
 
@@ -58,6 +61,9 @@ const elements = {
     gateShell: document.getElementById('gateShell'),
     gateBrowser: document.getElementById('gateBrowser'),
     gateSubAgent: document.getElementById('gateSubAgent'),
+    gateAgency: document.getElementById('gateAgency'),
+    gateVolition: document.getElementById('gateVolition'),
+    gatePerception: document.getElementById('gatePerception'),
     // Context toggle
     contextToggle: document.getElementById('contextToggle'),
     contextLabel: document.getElementById('contextLabel'),
@@ -743,7 +749,10 @@ const gateElements = [
     elements.gateFilesystem,
     elements.gateShell,
     elements.gateBrowser,
-    elements.gateSubAgent
+    elements.gateSubAgent,
+    elements.gateAgency,
+    elements.gateVolition,
+    elements.gatePerception
 ];
 
 gateElements.forEach(el => {
